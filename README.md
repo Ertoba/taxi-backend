@@ -18,7 +18,7 @@ Do not commit any of the following:
 - purchase codes or any separate secret supplied during activation;
 - API, payment, SMS, email, or signing secrets.
 
-The purchased `drop-files/lib/license.php` and all activation files are tracked exactly as supplied and are not modified or bypassed. The remaining `*.example.*` files are non-secret placeholders; real credential, payment/Maps/Firebase, and SMTP settings files are mounted into the isolated production runtime. Vendor activation is performed only through the official activation flow.
+The purchased `drop-files/lib/license.php`, activation files, empty credential files, and default settings files are tracked exactly as supplied. They are not modified or bypassed. The `*.example.*` files are non-secret deployment references; all real credentials and activated payment/Maps/Firebase/SMTP values exist only in the separate writable production runtime. Vendor activation is performed only through the official activation flow.
 
 ## Current status
 

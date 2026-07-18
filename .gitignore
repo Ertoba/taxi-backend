@@ -14,12 +14,8 @@ auth.json
 .env
 .env.*
 !.env.example
-drop-files/credentials.json
-drop-files/google-client/credentials.json
 !drop-files/credentials.example.json
 !drop-files/google-client/credentials.example.json
-drop-files/lib/settingsdata2.php
-drop-files/lib/settingsdata4.php
 !drop-files/lib/settingsdata2.example.php
 !drop-files/lib/settingsdata4.example.php
 deploy/secrets/

@@ -1,0 +1,121 @@
+name: droptaxi
+
+services:
+  mysql:
+    image: mysql:8.0.45-debian
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+    environment:
+      MYSQL_DATABASE: droptaxi
+      MYSQL_USER: droptaxi
+      MYSQL_PASSWORD_FILE: /run/secrets/db_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    secrets:
+      - db_password
+      - db_root_password
+    volumes:
+      - droptaxi_mysql_data:/var/lib/mysql
+      - ../../runtime/app/drop-files/install/database_setup.sql:/docker-entrypoint-initdb.d/10-database_setup.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot --password=\"$$(cat /run/secrets/db_root_password)\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - droptaxi_private
+
+  redis:
+    image: redis:7.2.14-bookworm
+    restart: unless-stopped
+    command: ["redis-server", "/run/secrets/redis_config"]
+    secrets:
+      - redis_config
+      - redis_password
+    volumes:
+      - droptaxi_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - droptaxi_private
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: droptaxi-php:2.3.0
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: &droptaxi_environment
+      DB_HOST: mysql
+      DB_SCHEMA: droptaxi
+      DB_USER: droptaxi
+      DB_PASS_FILE: /run/secrets/db_password
+      DB_TBL_PREFIX: cab_
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+    secrets: &droptaxi_app_secrets
+      - db_password
+      - redis_password
+    volumes: &droptaxi_app_volumes
+      - ../../runtime/app:/var/www/droptaxi
+    ports:
+      - "127.0.0.1:9180:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -H 'Host: taxi.mili.ge' http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - droptaxi_private
+
+  dispatch:
+    profiles: ["activated"]
+    image: droptaxi-php:2.3.0
+    restart: unless-stopped
+    command: ["php", "/var/www/droptaxi/public/cron.php"]
+    user: www-data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *droptaxi_environment
+    secrets: *droptaxi_app_secrets
+    volumes: *droptaxi_app_volumes
+    stop_grace_period: 30s
+    networks:
+      - droptaxi_private
+
+networks:
+  droptaxi_private:
+    name: droptaxi_private
+
+volumes:
+  droptaxi_mysql_data:
+    name: droptaxi_mysql_data
+  droptaxi_redis_data:
+    name: droptaxi_redis_data
+
+secrets:
+  db_password:
+    file: ../../secrets/db_password
+  db_root_password:
+    file: ../../secrets/db_root_password
+  redis_password:
+    file: ../../secrets/redis_password
+  redis_config:
+    file: ../../secrets/redis.conf
+
