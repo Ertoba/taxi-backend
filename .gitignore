@@ -1,0 +1,42 @@
+# Local operating-system and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# PHP dependencies and local tooling
+drop-files/vendor/
+vendor/
+composer.phar
+auth.json
+
+# Runtime secrets (mount these from the isolated production environment)
+.env
+.env.*
+!.env.example
+drop-files/credentials.json
+drop-files/google-client/credentials.json
+!drop-files/credentials.example.json
+!drop-files/google-client/credentials.example.json
+drop-files/lib/settingsdata2.php
+drop-files/lib/settingsdata4.php
+!drop-files/lib/settingsdata2.example.php
+!drop-files/lib/settingsdata4.example.php
+deploy/secrets/
+
+# Runtime state
+*.log
+logs/
+tmp/
+cache/
+drop-files/cache/
+drop-files/tmp/
+
+# Backups and generated archives
+*.bak
+*.backup
+*.sql
+*.sql.gz
+*.zip
+*.tar
+*.tar.gz

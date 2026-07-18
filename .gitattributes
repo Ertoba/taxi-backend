@@ -1,0 +1,3 @@
+# Preserve the purchased vendor source byte-for-byte across platforms.
+* -text
+
