@@ -1,3 +1,7 @@
-# Preserve the purchased vendor source byte-for-byte across platforms.
-* -text
+* text=auto
+
+# Keep the supplied activation/validation implementation byte-for-byte intact.
+app/Http/Controllers/InstallerController.php -text
+resources/views/installer/purchase-validation.blade.php -text
+resources/views/installer/purchaseValidation-error.blade.php -text
 

@@ -1,6 +1,0 @@
-{
-    "require": {
-        "kreait/firebase-php": "^5.0",
-        "giggsey/libphonenumber-for-php": "^8.13"
-    }
-}

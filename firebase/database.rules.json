@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "drivers": {
+      ".read": true,
+      ".write": true
+    },
+    "ride_requests": {
+      ".read": true,
+      ".write": true,
+      ".indexOn": [
+        "userId",
+        "driverId"
+      ]
+    }
+  }
+}
