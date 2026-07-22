@@ -35,7 +35,9 @@ trait SMSTrait
                 break;
 
             case 'ubill':
-                $this->sendViaUbill($message, $mobileNumber);
+                if (! $this->sendViaUbill($message, $mobileNumber)) {
+                    throw new \RuntimeException('uBILL SMS delivery failed.');
+                }
                 break;
 
                 // Add other SMS providers here as needed
