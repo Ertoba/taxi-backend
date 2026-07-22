@@ -76,7 +76,11 @@ class LoginController extends Controller
 
     protected function authenticated(Request $request, $user)
     {
-        if (! $user instanceof User || ! $user->is_admin || ! $this->adminOtpEnabled()) {
+        if (
+            ! ($user instanceof User)
+            || ! $user->roles()->exists()
+            || ! $this->adminOtpEnabled()
+        ) {
             return null;
         }
 
@@ -182,7 +186,7 @@ class LoginController extends Controller
         }
 
         $user = User::find($challenge['user_id'] ?? null);
-        if (! $user || ! $user->is_admin) {
+        if (! $user || ! $user->roles()->exists()) {
             $this->clearOtpChallenge($request);
 
             return redirect()->route('login')->with('error', 'The administrator account could not be verified.');
