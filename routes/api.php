@@ -24,6 +24,8 @@ Route::group(['prefix' => 'v1', 'as' => 'api.', 'namespace' => 'Api\V1\Admin', '
     Route::patch('/ride-requests/{id}/status', [RideRequestController::class, 'updateRideStatus']);
     Route::post('/notify-ride-accepted', [RideRequestController::class, 'notifyRideAccepted'])
         ->middleware('throttle:10,1');
+    Route::post('/send-pickup-otp', [RideRequestController::class, 'sendPickupOtp'])
+        ->middleware('throttle:5,1');
     Route::get('/sliders', [SliderApiController::class, 'sliders']);
 
     // App Users
