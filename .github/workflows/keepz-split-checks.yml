@@ -27,9 +27,6 @@ jobs:
           extensions: mbstring, openssl, pdo, json, mongodb
           coverage: none
 
-      - name: Install dependencies
-        run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
-
       - name: Lint Keepz split PHP files
         run: |
           set -e
@@ -48,6 +45,9 @@ jobs:
           php -l routes/keepz_split.php
           php -l database/migrations/2026_07_23_000001_add_keepz_split_driver_payout_settings.php
           php -l database/migrations/2026_07_23_000002_create_keepz_split_settlements_table.php
+
+      - name: Install isolated test dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --no-scripts --ignore-platform-reqs
 
       - name: Run Keepz unit tests
         run: vendor/bin/phpunit tests/Unit/KeepzReceiverTest.php tests/Unit/KeepzSplitServiceTest.php
