@@ -30,9 +30,6 @@ class PayoutMethodApiController extends Controller
     {
         $payoutMethods = PayoutMethod::select('id', 'name')
             ->where('status', 1)
-            ->where(function ($query): void {
-                $query->whereNull('module')->orWhere('module', 2);
-            })
             ->get()
             ->map(fn (PayoutMethod $method): array => [
                 'id' => $method->id,
