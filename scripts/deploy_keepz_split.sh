@@ -164,7 +164,7 @@ docker exec "$CONTAINER" sh -lc "cd '${APP_ROOT}' && php artisan optimize:clear"
 
 log "Verifying routes and database records"
 docker exec "$CONTAINER" sh -lc \
-  "cd '${APP_ROOT}' && php artisan route:list --path=keepz-split --columns=Method,URI,Name,Action"
+  "cd '${APP_ROOT}' && php artisan route:list --path=keepz-split"
 docker exec "$CONTAINER" sh -lc \
   "cd '${APP_ROOT}' && php artisan tinker --execute='echo \"PAYOUT_METHODS=\".\\App\\Models\\PayoutMethod::where(\"name\", \"keepz split receiver\")->where(\"status\", 1)->count().PHP_EOL; echo \"SETTLEMENT_TABLE=\".(\\Illuminate\\Support\\Facades\\Schema::hasTable(\"keepz_split_settlements\") ? \"yes\" : \"no\").PHP_EOL;'"
 
