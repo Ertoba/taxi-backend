@@ -18,11 +18,6 @@ class KeepzSplitService
         return strcasecmp((string) GeneralSetting::getMetaValue('keepz_split_status'), 'Active') === 0;
     }
 
-    public function allowsFallbackToMainReceiver(): bool
-    {
-        return (string) GeneralSetting::getMetaValue('keepz_split_fallback_to_main_receiver') === '1';
-    }
-
     public function platformReceiver(string $mode): array
     {
         $prefix = strtolower($mode) === 'live' ? 'live_keepz_' : 'test_keepz_';
@@ -77,10 +72,23 @@ class KeepzSplitService
     public function allocation(Booking $booking, float $totalAmount): array
     {
         $total = round($totalAmount, 2);
-        $driverAmount = round((float) $booking->vendor_commission, 2);
+        $driverCommissionBase = round((float) $booking->vendor_commission, 2);
+        $platformCommissionBase = round((float) $booking->admin_commission, 2);
+        $commissionBase = round($driverCommissionBase + $platformCommissionBase, 2);
+
+        if ($total <= 0 || $driverCommissionBase <= 0 || $platformCommissionBase < 0 || $commissionBase <= 0) {
+            throw new RuntimeException('Keepz split amounts are invalid for this ride.');
+        }
+
+        $driverRatio = $driverCommissionBase / $commissionBase;
+        if ($driverRatio <= 0 || $driverRatio > 1) {
+            throw new RuntimeException('Keepz split commission ratio is invalid for this ride.');
+        }
+
+        $driverAmount = round($total * $driverRatio, 2);
         $platformAmount = round($total - $driverAmount, 2);
 
-        if ($total <= 0 || $driverAmount <= 0 || $platformAmount < 0) {
+        if ($driverAmount <= 0 || $platformAmount < 0) {
             throw new RuntimeException('Keepz split amounts are invalid for this ride.');
         }
 
@@ -92,6 +100,7 @@ class KeepzSplitService
             'total' => $total,
             'platform' => $platformAmount,
             'driver' => $driverAmount,
+            'driver_ratio' => round($driverRatio, 8),
         ];
     }
 
