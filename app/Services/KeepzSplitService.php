@@ -22,21 +22,36 @@ class KeepzSplitService
     {
         $prefix = strtolower($mode) === 'live' ? 'live_keepz_' : 'test_keepz_';
         $type = KeepzReceiver::normalizeType(
-            GeneralSetting::getMetaValue($prefix.'split_platform_receiver_type')
+            GeneralSetting::getMetaValue($prefix.'receiver_type')
         );
         $identifier = KeepzReceiver::normalizeIdentifier(
-            GeneralSetting::getMetaValue($prefix.'split_platform_receiver_identifier'),
+            GeneralSetting::getMetaValue($prefix.'receiver_id'),
             $type
         );
+        $platformIban = KeepzReceiver::normalizeIdentifier(
+            GeneralSetting::getMetaValue($prefix.'split_platform_iban'),
+            KeepzReceiver::TYPE_IBAN
+        );
+        $mappingConfirmed = (string) GeneralSetting::getMetaValue(
+            $prefix.'split_platform_mapping_confirmed'
+        ) === '1';
 
-        if (! KeepzReceiver::isValid($type, $identifier)) {
-            throw new RuntimeException('Keepz platform split receiver is not configured correctly.');
+        if ($type !== KeepzReceiver::TYPE_BRANCH || ! KeepzReceiver::isValid($type, $identifier)) {
+            throw new RuntimeException('Keepz main receiver must be a valid BRANCH UUID for split payments.');
+        }
+
+        if (! KeepzReceiver::isValid(KeepzReceiver::TYPE_IBAN, $platformIban) || ! $mappingConfirmed) {
+            throw new RuntimeException('The platform IBAN mapping for the Keepz main branch is not confirmed.');
         }
 
         return [
             'type' => $type,
             'identifier' => $identifier,
             'masked_identifier' => KeepzReceiver::mask($type, $identifier),
+            'settlement_iban_masked' => KeepzReceiver::mask(
+                KeepzReceiver::TYPE_IBAN,
+                $platformIban
+            ),
         ];
     }
 
@@ -76,19 +91,19 @@ class KeepzSplitService
         $platformCommissionBase = round((float) $booking->admin_commission, 2);
         $commissionBase = round($driverCommissionBase + $platformCommissionBase, 2);
 
-        if ($total <= 0 || $driverCommissionBase <= 0 || $platformCommissionBase < 0 || $commissionBase <= 0) {
+        if ($total <= 0 || $driverCommissionBase <= 0 || $platformCommissionBase <= 0 || $commissionBase <= 0) {
             throw new RuntimeException('Keepz split amounts are invalid for this ride.');
         }
 
         $driverRatio = $driverCommissionBase / $commissionBase;
-        if ($driverRatio <= 0 || $driverRatio > 1) {
+        if ($driverRatio <= 0 || $driverRatio >= 1) {
             throw new RuntimeException('Keepz split commission ratio is invalid for this ride.');
         }
 
         $driverAmount = round($total * $driverRatio, 2);
         $platformAmount = round($total - $driverAmount, 2);
 
-        if ($driverAmount <= 0 || $platformAmount < 0) {
+        if ($driverAmount <= 0 || $platformAmount <= 0) {
             throw new RuntimeException('Keepz split amounts are invalid for this ride.');
         }
 
