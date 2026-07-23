@@ -3,7 +3,16 @@ name: Keepz Split Checks
 on:
   push:
     branches:
+      - main
       - feature/keepz-split-driver-payout
+    paths:
+      - 'app/**'
+      - 'routes/**'
+      - 'database/migrations/**'
+      - 'resources/views/**'
+      - 'tests/Unit/Keepz*'
+      - 'scripts/deploy_keepz_split.sh'
+      - '.github/workflows/keepz-split-checks.yml'
   pull_request:
     paths:
       - 'app/**'
@@ -11,6 +20,7 @@ on:
       - 'database/migrations/**'
       - 'resources/views/**'
       - 'tests/Unit/Keepz*'
+      - 'scripts/deploy_keepz_split.sh'
       - '.github/workflows/keepz-split-checks.yml'
 
 jobs:
@@ -19,6 +29,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Validate deployment script syntax
+        run: bash -n scripts/deploy_keepz_split.sh
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
