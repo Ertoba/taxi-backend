@@ -1,0 +1,53 @@
+name: Keepz Split Checks
+
+on:
+  push:
+    branches:
+      - feature/keepz-split-driver-payout
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'routes/**'
+      - 'database/migrations/**'
+      - 'resources/views/**'
+      - 'tests/Unit/Keepz*'
+      - '.github/workflows/keepz-split-checks.yml'
+
+jobs:
+  php-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, openssl, pdo, json
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Lint Keepz split PHP files
+        run: |
+          set -e
+          php -l app/Support/KeepzReceiver.php
+          php -l app/Services/KeepzSplitService.php
+          php -l app/Strategies/KeepzSplitStrategy.php
+          php -l app/Models/KeepzSplitSettlement.php
+          php -l app/Console/Commands/ReconcileKeepzSplitPayments.php
+          php -l app/Http/Controllers/Api/V1/Admin/PayoutMethodApiController.php
+          php -l app/Http/Controllers/Api/V1/Admin/KeepzSettlementApiController.php
+          php -l app/Http/Controllers/Admin/KeepzSplitSettingsController.php
+          php -l app/Http/Controllers/Admin/Driver/KeepzPayoutController.php
+          php -l app/Http/Controllers/Front/PaymentFrontController.php
+          php -l app/Providers/RouteServiceProvider.php
+          php -l routes/api.php
+          php -l routes/keepz_split.php
+          php -l database/migrations/2026_07_23_000001_add_keepz_split_driver_payout_settings.php
+          php -l database/migrations/2026_07_23_000002_create_keepz_split_settlements_table.php
+
+      - name: Run Keepz unit tests
+        run: vendor/bin/phpunit tests/Unit/KeepzReceiverTest.php tests/Unit/KeepzSplitServiceTest.php
