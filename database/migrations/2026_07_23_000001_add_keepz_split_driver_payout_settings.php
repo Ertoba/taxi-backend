@@ -20,10 +20,10 @@ return new class extends Migration
         $settings = [
             'keepz_split_status' => 'Inactive',
             'keepz_split_fallback_to_main_receiver' => '0',
-            'test_keepz_split_platform_receiver_type' => 'IBAN',
-            'test_keepz_split_platform_receiver_identifier' => '',
-            'live_keepz_split_platform_receiver_type' => 'IBAN',
-            'live_keepz_split_platform_receiver_identifier' => '',
+            'test_keepz_split_platform_iban' => '',
+            'test_keepz_split_platform_mapping_confirmed' => '0',
+            'live_keepz_split_platform_iban' => '',
+            'live_keepz_split_platform_mapping_confirmed' => '0',
         ];
 
         foreach ($settings as $key => $value) {
@@ -44,10 +44,10 @@ return new class extends Migration
         DB::table('general_settings')->whereIn('meta_key', [
             'keepz_split_status',
             'keepz_split_fallback_to_main_receiver',
-            'test_keepz_split_platform_receiver_type',
-            'test_keepz_split_platform_receiver_identifier',
-            'live_keepz_split_platform_receiver_type',
-            'live_keepz_split_platform_receiver_identifier',
+            'test_keepz_split_platform_iban',
+            'test_keepz_split_platform_mapping_confirmed',
+            'live_keepz_split_platform_iban',
+            'live_keepz_split_platform_mapping_confirmed',
         ])->delete();
 
         DB::table('payout_method')
