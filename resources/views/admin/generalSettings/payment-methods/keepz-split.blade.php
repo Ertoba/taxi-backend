@@ -25,12 +25,12 @@
                                 <input type="hidden" name="split_status" value="0">
 
                                 <div class="form-group">
-                                    <label class="col-sm-4 control-label">Environment</label>
+                                    <label class="col-sm-4 control-label">Active Keepz Environment</label>
                                     <div class="col-sm-6">
-                                        <select name="mode" class="form-control">
-                                            <option value="test" {{ old('mode', $mode) === 'test' ? 'selected' : '' }}>Test</option>
-                                            <option value="live" {{ old('mode', $mode) === 'live' ? 'selected' : '' }}>Live</option>
-                                        </select>
+                                        <p class="form-control-static">
+                                            <strong>{{ strtoupper($mode) }}</strong>
+                                        </p>
+                                        <span class="text-muted">Change the environment only from the main Keepz gateway settings.</span>
                                     </div>
                                 </div>
 
