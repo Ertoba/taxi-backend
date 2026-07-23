@@ -7,15 +7,15 @@ use App\Http\Controllers\Traits\MiscellaneousTrait;
 use App\Http\Controllers\Traits\PaymentStatusUpdaterTrait;
 use App\Models\Booking;
 use App\Models\GeneralSetting;
+use App\Strategies\KeepzSplitStrategy;
 use App\Strategies\PayduniyaStrategy;
-use App\Strategies\KeepzStrategy;
 use App\Strategies\PaypalStrategy;
 use App\Strategies\RazorpayStrategy;
 use App\Strategies\StripeStrategy;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-// Import any other strategies as needed
 class PaymentFrontController extends Controller
 {
     use MiscellaneousTrait, PaymentStatusUpdaterTrait;
@@ -39,14 +39,11 @@ class PaymentFrontController extends Controller
             return redirect('/invalid-order')->with('error', 'Invalid booking ID');
         }
 
-        $returnURL = $strategy->process($bookingId, $bookingData, $request);
-
-        return $returnURL;
+        return $strategy->process($bookingId, $bookingData, $request);
     }
 
     public function handleReturn(Request $request)
     {
-
         $bookingId = $request->input('booking');
         $method = $request->input('method');
 
@@ -55,11 +52,10 @@ class PaymentFrontController extends Controller
         if (! $strategy) {
             return redirect('/invalid-order')->with('error', 'Invalid booking ID');
         }
-        // $returnURL = $strategy->return($bookingId, $request->all());
+
         $returnURL = $strategy->return($bookingId, $request);
 
         return redirect($returnURL);
-
     }
 
     public function handleCallback(Request $request)
@@ -71,6 +67,7 @@ class PaymentFrontController extends Controller
         if (! $strategy) {
             return response()->json(['error' => 'Invalid payment method'], 400);
         }
+
         $strategy->callback($bookingId, $request->all());
 
         return response()->json(['message' => 'Callback processed'], 200);
@@ -91,26 +88,18 @@ class PaymentFrontController extends Controller
 
     protected function getPaymentStrategy($method)
     {
-        switch ($method) {
-            case 'paypal':
-                return new PaypalStrategy;
-            case 'stripe':
-                return new StripeStrategy;
-            case 'payduniya':
-                return new PayduniyaStrategy;
-            case 'razorpay':
-                return new RazorpayStrategy;
-            case 'keepz':
-                return new KeepzStrategy;
-
-            default:
-                return null;
-        }
+        return match ($method) {
+            'paypal' => new PaypalStrategy,
+            'stripe' => new StripeStrategy,
+            'payduniya' => new PayduniyaStrategy,
+            'razorpay' => new RazorpayStrategy,
+            'keepz' => new KeepzSplitStrategy,
+            default => null,
+        };
     }
 
     public function showPaymentPage(Request $request)
     {
-
         $bookingId = $request->booking;
 
         $keys = [
@@ -124,8 +113,6 @@ class PaymentFrontController extends Controller
         $settings = GeneralSetting::whereIn('meta_key', $keys)->get()->keyBy('meta_key');
         $stripe_status = $settings->get('stripe_status') ?? null;
         $paypal_status = $settings->get('paypal_status') ?? null;
-        $paydunya_status = $settings->get('paydunya_status') ?? null;
-        $razorpay_status = $settings->get('razorpay_status') ?? null;
         $keepz_status = $settings->get('keepz_status') ?? null;
 
         $stripeMode = $this->getGeneralSettingValue('stripe_options');
@@ -133,17 +120,9 @@ class PaymentFrontController extends Controller
             ? $this->getGeneralSettingValue('test_stripe_public_key')
             : $this->getGeneralSettingValue('live_stripe_public_key');
 
-        if ($stripe_status->meta_value == 'Active') {
-            $status_stripe = true;
-        } else {
-            $status_stripe = false;
-        }
+        $status_stripe = ($stripe_status?->meta_value ?? 'Inactive') === 'Active';
+        $status_paypal = ($paypal_status?->meta_value ?? 'Inactive') === 'Active';
 
-        if ($paypal_status->meta_value == 'Active') {
-            $status_paypal = true;
-        } else {
-            $status_paypal = false;
-        }
         $paymentMethods = [
             'stripe' => [
                 'active' => $status_stripe,
@@ -191,10 +170,6 @@ class PaymentFrontController extends Controller
         $ipnData = $request->all();
         $verify = $this->verifyPaypalIPN($ipnData);
 
-        // $filename = 'ipn_' . date('Y-m-d_H-i-s') . '.txt';
-        // $content = json_encode($ipnData, JSON_PRETTY_PRINT);
-        // file_put_contents(storage_path('app/ipn/' . $filename), $content);
-
         if ($verify) {
             $this->processPaypalPayment($ipnData);
         } else {
@@ -204,7 +179,6 @@ class PaymentFrontController extends Controller
 
     private function verifyPaypalIPN($ipnData)
     {
-
         $verifyURL = 'https://www.paypal.com/cgi-bin/webscr';
         $paypalMode = $this->getGeneralSettingValue('paypal_options');
         if ($paypalMode === 'test') {
@@ -220,19 +194,11 @@ class PaymentFrontController extends Controller
     {
         $transactionType = $ipnData['txn_type'];
         $paymentStatus = $ipnData['payment_status'];
-        $paymentAmount = $ipnData['mc_gross'];
-        $paymentCurrency = $ipnData['mc_currency'];
         $txnId = $ipnData['txn_id'];
-        $receiverEmail = $ipnData['receiver_email'];
-        $payerEmail = $ipnData['payer_email'];
         $bookingId = $ipnData['custom'];
 
-        // $filename = 'ipn_' . date('Y-m-d_H-i-s') . '.txt';
-        // $content = json_encode($ipnData, JSON_PRETTY_PRINT);
-        // file_put_contents(storage_path('app/ipn/' . $filename), $content);
         if ($transactionType === 'web_accept') {
             if ($paymentStatus === 'Completed') {
-                // Payment is completed
                 $booking = Booking::findOrFail($bookingId);
                 $transactionData = new \stdClass;
                 $transactionData->response_data = json_encode($ipnData);
@@ -255,13 +221,6 @@ class PaymentFrontController extends Controller
                     $this->updateBookingStatus($bookingId, $transactionData);
                 }
             }
-        } elseif ($transactionType === 'subscr_payment') {
-
-        } elseif ($transactionType === 'subscr_cancel' || $transactionType === 'subscr_eot') {
-
-        } elseif ($transactionType === 'recurring_payment') {
-
         }
-
     }
 }
