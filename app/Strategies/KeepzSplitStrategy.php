@@ -9,6 +9,7 @@ use App\Models\KeepzSplitSettlement;
 use App\Models\Transaction;
 use App\Services\KeepzSplitService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -58,6 +59,23 @@ class KeepzSplitStrategy implements PaymentStrategy
             return $this->legacyStrategy->process($bookingId, $bookingData, $request);
         }
 
+        $lock = Cache::lock('keepz-split-booking:'.(string) $bookingId, 30);
+        if (! $lock->get()) {
+            return redirect('/invalid-order')->with(
+                'error',
+                'A Keepz payment is already being prepared for this ride. Please wait and try again.'
+            );
+        }
+
+        try {
+            return $this->processSplitPayment($bookingId);
+        } finally {
+            optional($lock)->release();
+        }
+    }
+
+    private function processSplitPayment($bookingId)
+    {
         if (! $this->isConfigured()) {
             Log::warning('Keepz split payment was requested before gateway configuration was complete.');
 
@@ -71,6 +89,31 @@ class KeepzSplitStrategy implements PaymentStrategy
 
         if ($booking->payment_status === 'paid') {
             return redirect('/invalid-order')->with('error', 'This ride is already paid.');
+        }
+
+        $existingAttempt = $this->latestActiveSplitTransaction($booking->id);
+        if ($existingAttempt) {
+            $status = $this->verifyAndApplyStatus(
+                $booking->id,
+                (string) $existingAttempt->transaction_id
+            );
+
+            if ($status === 'success') {
+                return redirect('/payment_success?bookingId='.urlencode((string) $booking->id));
+            }
+
+            if (in_array($status, ['initial', 'processing'], true) || $status === null) {
+                $metadata = $this->transactionMetadata($existingAttempt->fresh());
+                $checkoutUrl = data_get($metadata, 'checkout_url');
+                if (is_string($checkoutUrl) && filter_var($checkoutUrl, FILTER_VALIDATE_URL)) {
+                    return redirect()->away($checkoutUrl);
+                }
+
+                return redirect('/invalid-order')->with(
+                    'error',
+                    'The existing Keepz payment is still being verified. Please try again shortly.'
+                );
+            }
         }
 
         $currency = strtoupper((string) ($booking->currency_code ?: 'GEL'));
@@ -110,6 +153,7 @@ class KeepzSplitStrategy implements PaymentStrategy
             'total_amount' => $allocation['total'],
             'platform_amount' => $allocation['platform'],
             'driver_amount' => $allocation['driver'],
+            'driver_ratio' => $allocation['driver_ratio'] ?? null,
             'platform_receiver_type' => $platformReceiver['type'],
             'platform_receiver_masked' => $platformReceiver['masked_identifier'],
             'driver_receiver_type' => $driverReceiver['type'],
@@ -158,7 +202,10 @@ class KeepzSplitStrategy implements PaymentStrategy
 
         $transaction->response_data = json_encode(array_merge(
             $splitMetadata,
-            ['gateway_create_response' => $this->safeGatewayPayload($response)]
+            [
+                'checkout_url' => $redirectUrl,
+                'gateway_create_response' => $this->safeGatewayPayload($response),
+            ]
         ), JSON_UNESCAPED_SLASHES);
         $transaction->payment_status = $redirectUrl ? 'pending' : 'failed';
         $transaction->save();
@@ -322,13 +369,19 @@ class KeepzSplitStrategy implements PaymentStrategy
                 return;
             }
 
-            if ($booking->payment_status === 'paid' && $booking->payment_method !== 'keepz') {
-                $transaction->payment_status = 'ignored_already_paid';
+            if ($booking->payment_status === 'paid') {
+                $transaction->payment_status = 'duplicate_paid_requires_refund';
                 $transaction->response_data = json_encode(array_merge(
                     $metadata,
                     ['gateway_status_response' => $this->safeGatewayPayload($response)]
                 ), JSON_UNESCAPED_SLASHES);
                 $transaction->save();
+
+                Log::critical('A duplicate successful Keepz split payment requires manual refund review.', [
+                    'booking_id' => $bookingId,
+                    'integrator_order_id' => $integratorOrderId,
+                    'existing_transaction_id' => $booking->transaction,
+                ]);
 
                 return;
             }
@@ -343,25 +396,23 @@ class KeepzSplitStrategy implements PaymentStrategy
             ), JSON_UNESCAPED_SLASHES);
             $transaction->save();
 
-            KeepzSplitSettlement::updateOrCreate(
-                ['booking_id' => $booking->id],
-                [
-                    'transaction_id' => $transaction->id,
-                    'driver_id' => (int) $booking->host_id,
-                    'integrator_order_id' => $integratorOrderId,
-                    'currency_code' => strtoupper((string) $transaction->currency_code),
-                    'total_amount' => (float) ($metadata['total_amount'] ?? $transaction->amount),
-                    'platform_amount' => (float) ($metadata['platform_amount'] ?? 0),
-                    'driver_amount' => (float) ($metadata['driver_amount'] ?? 0),
-                    'platform_receiver_type' => (string) ($metadata['platform_receiver_type'] ?? ''),
-                    'platform_receiver_masked' => (string) ($metadata['platform_receiver_masked'] ?? ''),
-                    'driver_receiver_type' => (string) ($metadata['driver_receiver_type'] ?? ''),
-                    'driver_receiver_masked' => (string) ($metadata['driver_receiver_masked'] ?? ''),
-                    'gateway_status' => 'SUCCESS',
-                    'gateway_payload' => $this->safeGatewayPayload($response),
-                    'paid_at' => now(),
-                ]
-            );
+            KeepzSplitSettlement::create([
+                'booking_id' => $booking->id,
+                'transaction_id' => $transaction->id,
+                'driver_id' => (int) $booking->host_id,
+                'integrator_order_id' => $integratorOrderId,
+                'currency_code' => strtoupper((string) $transaction->currency_code),
+                'total_amount' => (float) ($metadata['total_amount'] ?? $transaction->amount),
+                'platform_amount' => (float) ($metadata['platform_amount'] ?? 0),
+                'driver_amount' => (float) ($metadata['driver_amount'] ?? 0),
+                'platform_receiver_type' => (string) ($metadata['platform_receiver_type'] ?? ''),
+                'platform_receiver_masked' => (string) ($metadata['platform_receiver_masked'] ?? ''),
+                'driver_receiver_type' => (string) ($metadata['driver_receiver_type'] ?? ''),
+                'driver_receiver_masked' => (string) ($metadata['driver_receiver_masked'] ?? ''),
+                'gateway_status' => 'SUCCESS',
+                'gateway_payload' => $this->safeGatewayPayload($response),
+                'paid_at' => now(),
+            ]);
 
             $booking->payment_status = 'paid';
             $booking->payment_method = 'keepz';
@@ -397,6 +448,17 @@ class KeepzSplitStrategy implements PaymentStrategy
                 ]);
             }
         }
+    }
+
+    private function latestActiveSplitTransaction(int $bookingId): ?Transaction
+    {
+        return Transaction::query()
+            ->where('booking_id', $bookingId)
+            ->where('gateway_name', 'keepz')
+            ->whereIn('payment_status', ['pending', 'initial', 'processing'])
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn (Transaction $transaction): bool => $this->transactionContainsSplitMetadata($transaction));
     }
 
     private function isSplitTransaction($bookingId, ?string $integratorOrderId): bool
