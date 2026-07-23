@@ -21,8 +21,12 @@ class KeepzSplitSettingsController extends Controller
         return view('admin.generalSettings.payment-methods.keepz-split', [
             'mode' => $mode,
             'splitStatus' => (string) GeneralSetting::getMetaValue('keepz_split_status'),
-            'receiverType' => (string) GeneralSetting::getMetaValue($prefix.'split_platform_receiver_type'),
-            'receiverIdentifier' => (string) GeneralSetting::getMetaValue($prefix.'split_platform_receiver_identifier'),
+            'mainReceiverType' => (string) GeneralSetting::getMetaValue($prefix.'receiver_type'),
+            'mainReceiverId' => (string) GeneralSetting::getMetaValue($prefix.'receiver_id'),
+            'platformIban' => (string) GeneralSetting::getMetaValue($prefix.'split_platform_iban'),
+            'mappingConfirmed' => (string) GeneralSetting::getMetaValue(
+                $prefix.'split_platform_mapping_confirmed'
+            ) === '1',
         ]);
     }
 
@@ -32,30 +36,56 @@ class KeepzSplitSettingsController extends Controller
 
         $validated = $request->validate([
             'split_status' => 'required|boolean',
-            'receiver_type' => 'required|in:IBAN,BRANCH,USER',
-            'receiver_identifier' => 'nullable|string|max:80',
+            'platform_iban' => 'nullable|string|max:40',
+            'mapping_confirmed' => 'nullable|boolean',
         ]);
 
-        $type = KeepzReceiver::normalizeType($validated['receiver_type']);
-        $identifier = KeepzReceiver::normalizeIdentifier($validated['receiver_identifier'] ?? '', $type);
         $splitEnabled = (bool) $validated['split_status'];
+        $mappingConfirmed = $request->boolean('mapping_confirmed');
+        $mode = $this->activeMode();
+        $prefix = $mode.'_keepz_';
+        $mainReceiverType = KeepzReceiver::normalizeType(
+            GeneralSetting::getMetaValue($prefix.'receiver_type')
+        );
+        $mainReceiverId = KeepzReceiver::normalizeIdentifier(
+            GeneralSetting::getMetaValue($prefix.'receiver_id'),
+            $mainReceiverType
+        );
+        $platformIban = KeepzReceiver::normalizeIdentifier(
+            $validated['platform_iban'] ?? '',
+            KeepzReceiver::TYPE_IBAN
+        );
 
-        if ($splitEnabled && ! KeepzReceiver::isValid($type, $identifier)) {
-            return redirect()->back()->withErrors([
-                'receiver_identifier' => $type === KeepzReceiver::TYPE_IBAN
-                    ? 'Enter a valid Georgian IBAN in the format GE00AA0000000000000000.'
-                    : 'Enter a valid Keepz receiver UUID.',
-            ])->withInput();
+        if ($splitEnabled) {
+            if (
+                $mainReceiverType !== KeepzReceiver::TYPE_BRANCH
+                || ! KeepzReceiver::isValid($mainReceiverType, $mainReceiverId)
+            ) {
+                return redirect()->back()->withErrors([
+                    'platform_iban' => 'The active Keepz main receiver must be configured as a valid BRANCH UUID before Split can be enabled.',
+                ])->withInput();
+            }
+
+            if (! KeepzReceiver::isValid(KeepzReceiver::TYPE_IBAN, $platformIban)) {
+                return redirect()->back()->withErrors([
+                    'platform_iban' => 'Enter the Georgian IBAN assigned by Keepz to the active main BRANCH receiver.',
+                ])->withInput();
+            }
+
+            if (! $mappingConfirmed) {
+                return redirect()->back()->withErrors([
+                    'mapping_confirmed' => 'Confirm that Keepz has mapped the displayed main BRANCH receiver to this platform IBAN.',
+                ])->withInput();
+            }
         }
 
-        $prefix = $this->activeMode().'_keepz_';
         GeneralSetting::updateOrCreate(
-            ['meta_key' => $prefix.'split_platform_receiver_type'],
-            ['meta_value' => $type, 'module' => 2]
+            ['meta_key' => $prefix.'split_platform_iban'],
+            ['meta_value' => $platformIban, 'module' => 2]
         );
         GeneralSetting::updateOrCreate(
-            ['meta_key' => $prefix.'split_platform_receiver_identifier'],
-            ['meta_value' => $identifier, 'module' => 2]
+            ['meta_key' => $prefix.'split_platform_mapping_confirmed'],
+            ['meta_value' => $mappingConfirmed ? '1' : '0', 'module' => 2]
         );
         GeneralSetting::updateOrCreate(
             ['meta_key' => 'keepz_split_status'],
