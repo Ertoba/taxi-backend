@@ -103,7 +103,8 @@ class KeepzSplitStrategy implements PaymentStrategy
             }
 
             if (in_array($status, ['initial', 'processing'], true) || $status === null) {
-                $metadata = $this->transactionMetadata($existingAttempt->fresh());
+                $freshAttempt = $existingAttempt->fresh() ?? $existingAttempt;
+                $metadata = $this->transactionMetadata($freshAttempt);
                 $checkoutUrl = data_get($metadata, 'checkout_url');
                 if (is_string($checkoutUrl) && filter_var($checkoutUrl, FILTER_VALIDATE_URL)) {
                     return redirect()->away($checkoutUrl);
@@ -309,7 +310,7 @@ class KeepzSplitStrategy implements PaymentStrategy
                 'integrator_order_id' => $integratorOrderId,
             ]);
 
-            return 'order_mismatch';
+            return null;
         }
 
         $status = $this->normalizeStatus(
@@ -323,7 +324,7 @@ class KeepzSplitStrategy implements PaymentStrategy
                     'integrator_order_id' => $integratorOrderId,
                 ]);
 
-                return 'amount_or_currency_mismatch';
+                return null;
             }
 
             $this->finalizeSuccessfulPayment($bookingId, $integratorOrderId, $response ?? []);
