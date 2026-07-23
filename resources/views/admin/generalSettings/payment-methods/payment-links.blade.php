@@ -11,4 +11,8 @@
             </a>
         </li>
     @endforeach
+
+    <li class="{{ request()->routeIs('admin.keepz_split.*') ? 'active' : '' }}">
+        <a href="{{ route('admin.keepz_split.settings') }}">Keepz Split</a>
+    </li>
 </ul>
