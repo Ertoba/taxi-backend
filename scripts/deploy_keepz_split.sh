@@ -39,6 +39,12 @@ log() {
   printf '\n[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"
 }
 
+force_split_inactive() {
+  docker exec "$CONTAINER" sh -lc \
+    "cd '${APP_ROOT}' && php artisan tinker --execute='\\App\\Models\\GeneralSetting::updateOrCreate([\"meta_key\" => \"keepz_split_status\"], [\"meta_value\" => \"Inactive\", \"module\" => 2]); echo \"KEEPZ_SPLIT=Inactive\".PHP_EOL;'" \
+    >/dev/null 2>&1 || true
+}
+
 restore_code() {
   log "Restoring application files from ${BACKUP_DIR}"
 
@@ -57,6 +63,7 @@ restore_code() {
     done < "${BACKUP_DIR}/missing-before.txt"
   fi
 
+  force_split_inactive
   docker exec "$CONTAINER" sh -lc "cd '${APP_ROOT}' && php artisan optimize:clear" || true
 }
 
@@ -64,8 +71,9 @@ cleanup() {
   rc=$?
 
   if [[ $rc -ne 0 && $FILES_INSTALLED -eq 1 && $SUCCESS -eq 0 ]]; then
+    force_split_inactive
     restore_code || true
-    printf '\nDeployment failed. Code was restored. Additive migrations/settings may remain, but Keepz Split was forced Inactive.\n' >&2
+    printf '\nDeployment failed. Runtime code was restored and Keepz Split was forced Inactive. Additive migration records may remain safely unused.\n' >&2
   fi
 
   docker exec "$CONTAINER" rm -rf "$STAGE" >/dev/null 2>&1 || true
@@ -156,21 +164,24 @@ docker exec "$CONTAINER" sh -lc \
   "cd '${APP_ROOT}' && php artisan migrate --force --path=database/migrations/2026_07_23_000002_create_keepz_split_settlements_table.php"
 
 log "Forcing Keepz Split to Inactive until TEST verification is completed"
-docker exec "$CONTAINER" sh -lc \
-  "cd '${APP_ROOT}' && php artisan tinker --execute='\\App\\Models\\GeneralSetting::updateOrCreate([\"meta_key\" => \"keepz_split_status\"], [\"meta_value\" => \"Inactive\", \"module\" => 2]); echo \"KEEPZ_SPLIT=Inactive\".PHP_EOL;'"
+force_split_inactive
 
 log "Clearing Laravel caches"
 docker exec "$CONTAINER" sh -lc "cd '${APP_ROOT}' && php artisan optimize:clear"
 
-log "Verifying routes and database records"
+log "Verifying routes, command registration and database records"
 docker exec "$CONTAINER" sh -lc \
   "cd '${APP_ROOT}' && php artisan route:list --path=keepz-split"
 docker exec "$CONTAINER" sh -lc \
-  "cd '${APP_ROOT}' && php artisan tinker --execute='echo \"PAYOUT_METHODS=\".\\App\\Models\\PayoutMethod::where(\"name\", \"keepz split receiver\")->where(\"status\", 1)->count().PHP_EOL; echo \"SETTLEMENT_TABLE=\".(\\Illuminate\\Support\\Facades\\Schema::hasTable(\"keepz_split_settlements\") ? \"yes\" : \"no\").PHP_EOL;'"
+  "cd '${APP_ROOT}' && php artisan route:list --path=send-pickup-otp"
+docker exec "$CONTAINER" sh -lc \
+  "cd '${APP_ROOT}' && php artisan list | grep -q 'payments:reconcile-keepz-split'"
+docker exec "$CONTAINER" sh -lc \
+  "cd '${APP_ROOT}' && php artisan tinker --execute='echo \"PAYOUT_METHODS=\".\\App\\Models\\PayoutMethod::where(\"name\", \"keepz split receiver\")->where(\"status\", 1)->count().PHP_EOL; echo \"SETTLEMENT_TABLE=\".(\\Illuminate\\Support\\Facades\\Schema::hasTable(\"keepz_split_settlements\") ? \"yes\" : \"no\").PHP_EOL; echo \"KEEPZ_SPLIT=\".(string) \\App\\Models\\GeneralSetting::getMetaValue(\"keepz_split_status\").PHP_EOL;'"
 
 SUCCESS=1
 log "KEEPZ SPLIT BACKEND DEPLOYED SAFELY"
 echo "Source commit: ${SOURCE_COMMIT}"
 echo "Rollback backup: ${BACKUP_DIR}"
 echo "Keepz Split status: Inactive"
-echo "Next step: configure platform BRANCH-to-IBAN mapping and test with Keepz TEST mode."
+echo "Next step: configure the platform BRANCH-to-IBAN mapping and test in Keepz TEST mode."
