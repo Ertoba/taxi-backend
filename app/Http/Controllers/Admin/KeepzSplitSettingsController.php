@@ -15,9 +15,7 @@ class KeepzSplitSettingsController extends Controller
     {
         abort_if(Gate::denies('general_setting_access'), Response::HTTP_FORBIDDEN, '403 Forbidden');
 
-        $mode = strtolower((string) GeneralSetting::getMetaValue('keepz_options')) === 'live'
-            ? 'live'
-            : 'test';
+        $mode = $this->activeMode();
         $prefix = $mode.'_keepz_';
 
         return view('admin.generalSettings.payment-methods.keepz-split', [
@@ -33,7 +31,6 @@ class KeepzSplitSettingsController extends Controller
         abort_if(Gate::denies('general_setting_edit'), Response::HTTP_FORBIDDEN, '403 Forbidden');
 
         $validated = $request->validate([
-            'mode' => 'required|in:test,live',
             'split_status' => 'required|boolean',
             'receiver_type' => 'required|in:IBAN,BRANCH,USER',
             'receiver_identifier' => 'nullable|string|max:80',
@@ -51,7 +48,7 @@ class KeepzSplitSettingsController extends Controller
             ])->withInput();
         }
 
-        $prefix = $validated['mode'].'_keepz_';
+        $prefix = $this->activeMode().'_keepz_';
         GeneralSetting::updateOrCreate(
             ['meta_key' => $prefix.'split_platform_receiver_type'],
             ['meta_value' => $type, 'module' => 2]
@@ -70,5 +67,12 @@ class KeepzSplitSettingsController extends Controller
         );
 
         return redirect()->back()->with('success', 'Keepz split settings updated successfully.');
+    }
+
+    private function activeMode(): string
+    {
+        return strtolower((string) GeneralSetting::getMetaValue('keepz_options')) === 'live'
+            ? 'live'
+            : 'test';
     }
 }
