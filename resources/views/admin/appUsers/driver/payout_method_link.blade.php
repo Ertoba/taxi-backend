@@ -4,6 +4,7 @@
         'paypal' => 'Paypal',
         'upi' => 'UPI',
         'bank' => 'Bank Account',
+        'keepz' => 'Keepz Split',
     ];
 @endphp
 

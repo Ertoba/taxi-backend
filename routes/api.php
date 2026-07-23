@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Auth\TokenController;
+use App\Http\Controllers\Api\V1\Admin\KeepzSettlementApiController;
 use App\Http\Controllers\Api\V1\Admin\RideRequestController;
 use App\Http\Controllers\Api\V1\Admin\SliderApiController;
 use App\Http\Controllers\Front\PaymentFrontController;
@@ -64,6 +65,8 @@ Route::group(['prefix' => 'v1', 'as' => 'api.', 'namespace' => 'Api\V1\Admin', '
     Route::post('/update-payout-method', 'PayoutMethodApiController@updatePayoutMethod');
     Route::post('/get-payout-methods', 'PayoutMethodApiController@getPayoutMethods');
     Route::get('/get-payout-types', 'PayoutMethodApiController@getPayoutTypes');
+    Route::post('/get-keepz-split-settlements', [KeepzSettlementApiController::class, 'index'])
+        ->middleware('throttle:30,1');
 
     Route::post('/getDriverEarings ', 'DriverFinanceApiController@getDriverEarings');
 

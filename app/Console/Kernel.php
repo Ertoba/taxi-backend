@@ -25,6 +25,9 @@ class Kernel extends ConsoleKernel
     {
 
         $schedule->job(new DistributeVendorCommissionJob)->cron('* * * * *');
+        $schedule->command('payments:reconcile-keepz-split')
+            ->everyFiveMinutes()
+            ->withoutOverlapping();
         $schedule->command('log:clean')->daily();
         $schedule->command('tokens:cleanup')->everyFiveMinutes();
     }

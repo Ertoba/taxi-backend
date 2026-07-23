@@ -17,7 +17,10 @@ use App\Models\AppUser;
 use App\Models\AppUserMeta;
 use App\Models\Payout;
 use App\Models\PayoutMethod;
+use App\Services\KeepzSplitService;
+use App\Support\KeepzReceiver;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Validator;
 
 class PayoutMethodApiController extends Controller
@@ -56,7 +59,7 @@ class PayoutMethodApiController extends Controller
         }
 
         $user = AppUser::where('token', $request->input('token'))->first();
-        if (! $user) {
+        if (! $user || $user->user_type !== 'driver') {
             return $this->addErrorResponse(404, trans('front.user_not_found'), '');
         }
 
@@ -66,6 +69,23 @@ class PayoutMethodApiController extends Controller
             $payoutMethod = PayoutMethod::where('name', $meta->meta_key)->first();
             if ($payoutMethod) {
                 $decoded = json_decode($meta->meta_value, true);
+                if (! is_array($decoded)) {
+                    return;
+                }
+
+                if (strtolower($meta->meta_key) === KeepzSplitService::DRIVER_META_KEY) {
+                    $type = KeepzReceiver::normalizeType(
+                        $decoded['keepz_receiver_type'] ?? KeepzReceiver::TYPE_IBAN
+                    );
+                    $identifier = KeepzReceiver::normalizeIdentifier(
+                        $decoded['keepz_receiver_identifier'] ?? '',
+                        $type
+                    );
+                    $decoded['keepz_receiver_type'] = $type;
+                    $decoded['keepz_receiver_identifier'] = $identifier;
+                    $decoded['keepz_receiver_identifier_masked'] = KeepzReceiver::mask($type, $identifier);
+                }
+
                 $payoutMethods->push([
                     'id' => $payoutMethod->id,
                     'payout_method' => $payoutMethod->name,
@@ -99,7 +119,7 @@ class PayoutMethodApiController extends Controller
         }
 
         $user = AppUser::where('token', $request->input('token'))->first();
-        if (! $user) {
+        if (! $user || $user->user_type !== 'driver') {
             return $this->addErrorResponse(404, trans('front.user_not_found'), '');
         }
 
@@ -107,7 +127,9 @@ class PayoutMethodApiController extends Controller
 
         foreach ($request->input('payout_methods') as $methodData) {
             $payoutMethodId = $methodData['payout_method_id'];
-            $payoutMethod = PayoutMethod::find($payoutMethodId);
+            $payoutMethod = PayoutMethod::whereKey($payoutMethodId)
+                ->where('status', 1)
+                ->first();
             if (! $payoutMethod) {
                 continue;
             }
@@ -115,26 +137,62 @@ class PayoutMethodApiController extends Controller
             $type = strtolower($payoutMethod->name);
 
             // Validation rules
-            $rules = $type === 'bank account'
-                ? [
-                    'account_name' => 'required|string',
-                    'bank_name' => 'required|string',
-                    'branch_name' => 'nullable|string',
-                    'account_number' => 'required|string',
-                    'iban' => 'nullable|string',
-                    'swift_code' => 'nullable|string',
-                ]
-                : [
-                    'email' => 'required',
-                    'note' => 'nullable|string',
+            if ($type === KeepzSplitService::DRIVER_META_KEY) {
+                $rules = [
+                    'account_name' => 'required|string|max:120',
+                    'keepz_receiver_type' => ['required', Rule::in([KeepzReceiver::TYPE_IBAN])],
+                    'keepz_receiver_identifier' => 'required|string|max:40',
                 ];
+            } else {
+                $rules = $type === 'bank account'
+                    ? [
+                        'account_name' => 'required|string',
+                        'bank_name' => 'required|string',
+                        'branch_name' => 'nullable|string',
+                        'account_number' => 'required|string',
+                        'iban' => 'nullable|string',
+                        'swift_code' => 'nullable|string',
+                    ]
+                    : [
+                        'email' => 'required',
+                        'note' => 'nullable|string',
+                    ];
+            }
 
             $validator = Validator::make($methodData, $rules);
             if ($validator->fails()) {
+                if ($type === KeepzSplitService::DRIVER_META_KEY) {
+                    return $this->errorComputing($validator);
+                }
                 continue;
             }
 
             $validatedData = $validator->validated();
+            if ($type === KeepzSplitService::DRIVER_META_KEY) {
+                $validatedData['keepz_receiver_type'] = KeepzReceiver::TYPE_IBAN;
+                $validatedData['keepz_receiver_identifier'] = KeepzReceiver::normalizeIdentifier(
+                    $validatedData['keepz_receiver_identifier'],
+                    KeepzReceiver::TYPE_IBAN
+                );
+
+                if (! KeepzReceiver::isValid(
+                    KeepzReceiver::TYPE_IBAN,
+                    $validatedData['keepz_receiver_identifier']
+                )) {
+                    $validator->errors()->add(
+                        'keepz_receiver_identifier',
+                        'Enter a valid Georgian IBAN in the format GE00AA0000000000000000.'
+                    );
+
+                    return $this->errorComputing($validator);
+                }
+
+                $validatedData['keepz_receiver_identifier_masked'] = KeepzReceiver::mask(
+                    KeepzReceiver::TYPE_IBAN,
+                    $validatedData['keepz_receiver_identifier']
+                );
+            }
+
             $validatedData['id'] = $payoutMethod->id;
             $validatedData['is_active'] = isset($methodData['is_active']) ? (int) $methodData['is_active'] : 0;
 

@@ -8,11 +8,12 @@ use App\Http\Controllers\Traits\PaymentStatusUpdaterTrait;
 use App\Models\Booking;
 use App\Models\GeneralSetting;
 use App\Strategies\PayduniyaStrategy;
-use App\Strategies\KeepzStrategy;
+use App\Strategies\KeepzSplitStrategy;
 use App\Strategies\PaypalStrategy;
 use App\Strategies\RazorpayStrategy;
 use App\Strategies\StripeStrategy;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // Import any other strategies as needed
@@ -101,7 +102,7 @@ class PaymentFrontController extends Controller
             case 'razorpay':
                 return new RazorpayStrategy;
             case 'keepz':
-                return new KeepzStrategy;
+                return new KeepzSplitStrategy;
 
             default:
                 return null;
