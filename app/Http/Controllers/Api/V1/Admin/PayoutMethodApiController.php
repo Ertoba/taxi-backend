@@ -15,10 +15,12 @@ use App\Http\Controllers\Traits\UserWalletTrait;
 use App\Http\Controllers\Traits\VendorWalletTrait;
 use App\Models\AppUser;
 use App\Models\AppUserMeta;
-use App\Models\Payout;
 use App\Models\PayoutMethod;
+use App\Services\KeepzSplitService;
+use App\Support\KeepzReceiver;
 use Illuminate\Http\Request;
-use Validator;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class PayoutMethodApiController extends Controller
 {
@@ -26,16 +28,16 @@ class PayoutMethodApiController extends Controller
 
     public function getPayoutTypes(Request $request)
     {
-
         $payoutMethods = PayoutMethod::select('id', 'name')
             ->where('status', 1)
+            ->where(function ($query): void {
+                $query->whereNull('module')->orWhere('module', 2);
+            })
             ->get()
-            ->map(function ($method) {
-                return [
-                    'id' => $method->id,
-                    'name' => strtolower($method->name),
-                ];
-            });
+            ->map(fn (PayoutMethod $method): array => [
+                'id' => $method->id,
+                'name' => strtolower($method->name),
+            ]);
 
         return $this->addSuccessResponse(
             200,
@@ -46,41 +48,53 @@ class PayoutMethodApiController extends Controller
 
     public function getPayoutMethods(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            // 'token' => 'required|exists:app_users,token',
-            'token' => 'required',
-        ]);
-
+        $validator = Validator::make($request->all(), ['token' => 'required']);
         if ($validator->fails()) {
             return $this->errorComputing($validator);
         }
 
         $user = AppUser::where('token', $request->input('token'))->first();
-        if (! $user) {
+        if (! $user || $user->user_type !== 'driver') {
             return $this->addErrorResponse(404, trans('front.user_not_found'), '');
         }
 
         $payoutMethods = collect();
-
-        $user->metadata()->get()->each(function ($meta) use ($payoutMethods) {
-            $payoutMethod = PayoutMethod::where('name', $meta->meta_key)->first();
-            if ($payoutMethod) {
-                $decoded = json_decode($meta->meta_value, true);
-                $payoutMethods->push([
-                    'id' => $payoutMethod->id,
-                    'payout_method' => $payoutMethod->name,
-                    'details' => $decoded,
-                    // 'is_active' => isset($decoded['is_active']) ? (int)$decoded['is_active'] : 0,
-                ]);
+        $user->metadata()->get()->each(function (AppUserMeta $meta) use ($payoutMethods): void {
+            $payoutMethod = PayoutMethod::whereRaw('LOWER(name) = ?', [strtolower($meta->meta_key)])->first();
+            if (! $payoutMethod) {
+                return;
             }
+
+            $decoded = json_decode((string) $meta->meta_value, true);
+            if (! is_array($decoded)) {
+                return;
+            }
+
+            if (strtolower($meta->meta_key) === KeepzSplitService::DRIVER_META_KEY) {
+                $decoded['keepz_receiver_type'] = KeepzReceiver::normalizeType(
+                    $decoded['keepz_receiver_type'] ?? KeepzReceiver::TYPE_IBAN
+                );
+                $decoded['keepz_receiver_identifier'] = KeepzReceiver::normalizeIdentifier(
+                    $decoded['keepz_receiver_identifier'] ?? '',
+                    $decoded['keepz_receiver_type']
+                );
+                $decoded['keepz_receiver_identifier_masked'] = KeepzReceiver::mask(
+                    $decoded['keepz_receiver_type'],
+                    $decoded['keepz_receiver_identifier']
+                );
+            }
+
+            $payoutMethods->push([
+                'id' => $payoutMethod->id,
+                'payout_method' => $payoutMethod->name,
+                'details' => $decoded,
+            ]);
         });
 
         return $this->addSuccessResponse(
             200,
             trans('front.payment_methods_retrieved_successfully'),
-            [
-                'payout_methods' => $payoutMethods,
-            ]
+            ['payout_methods' => $payoutMethods]
         );
     }
 
@@ -88,76 +102,114 @@ class PayoutMethodApiController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'token' => 'required',
-            // 'token' => 'required|exists:app_users,token',
-            'payout_methods' => 'required|array',
+            'payout_methods' => 'required|array|min:1',
             'payout_methods.*.payout_method_id' => 'required|exists:payout_method,id',
             'payout_methods.*.is_active' => 'nullable|boolean',
         ]);
-
         if ($validator->fails()) {
             return $this->errorComputing($validator);
         }
 
         $user = AppUser::where('token', $request->input('token'))->first();
-        if (! $user) {
+        if (! $user || $user->user_type !== 'driver') {
             return $this->addErrorResponse(404, trans('front.user_not_found'), '');
         }
 
         $responseData = [];
 
         foreach ($request->input('payout_methods') as $methodData) {
-            $payoutMethodId = $methodData['payout_method_id'];
-            $payoutMethod = PayoutMethod::find($payoutMethodId);
+            $payoutMethod = PayoutMethod::whereKey($methodData['payout_method_id'])
+                ->where('status', 1)
+                ->first();
             if (! $payoutMethod) {
-                continue;
+                return $this->addErrorResponse(422, 'Invalid or inactive payout method.', '');
             }
 
             $type = strtolower($payoutMethod->name);
-
-            // Validation rules
-            $rules = $type === 'bank account'
-                ? [
-                    'account_name' => 'required|string',
-                    'bank_name' => 'required|string',
-                    'branch_name' => 'nullable|string',
-                    'account_number' => 'required|string',
-                    'iban' => 'nullable|string',
-                    'swift_code' => 'nullable|string',
-                ]
-                : [
-                    'email' => 'required',
-                    'note' => 'nullable|string',
-                ];
-
-            $validator = Validator::make($methodData, $rules);
-            if ($validator->fails()) {
-                continue;
+            $validatedData = $this->validateMethodData($type, $methodData);
+            if ($validatedData instanceof \Illuminate\Contracts\Validation\Validator) {
+                return $this->errorComputing($validatedData);
             }
 
-            $validatedData = $validator->validated();
             $validatedData['id'] = $payoutMethod->id;
-            $validatedData['is_active'] = isset($methodData['is_active']) ? (int) $methodData['is_active'] : 0;
+            $validatedData['is_active'] = isset($methodData['is_active'])
+                ? (int) ((bool) $methodData['is_active'])
+                : 0;
 
-            // Save all payout methods (including bank accounts) in AppUserMeta only
             AppUserMeta::updateOrCreate(
                 ['user_id' => $user->id, 'meta_key' => $type],
-                ['meta_value' => json_encode($validatedData)]
+                ['meta_value' => json_encode($validatedData, JSON_UNESCAPED_SLASHES)]
             );
 
             $responseData[] = [
                 'id' => $payoutMethod->id,
                 'payout_method' => $type,
                 'details' => $validatedData,
-                // 'is_active' => $validatedData['is_active'],
             ];
         }
 
         return $this->addSuccessResponse(
             200,
             trans('front.payment_method_saved_successfully'),
-            [
-                'payout_methods' => $responseData,
-            ]
+            ['payout_methods' => $responseData]
         );
+    }
+
+    private function validateMethodData(string $type, array $methodData): array|\Illuminate\Contracts\Validation\Validator
+    {
+        if ($type === KeepzSplitService::DRIVER_META_KEY) {
+            $validator = Validator::make($methodData, [
+                'account_name' => 'required|string|max:120',
+                'keepz_receiver_type' => ['required', Rule::in([KeepzReceiver::TYPE_IBAN])],
+                'keepz_receiver_identifier' => ['required', 'string', 'max:40'],
+            ]);
+            if ($validator->fails()) {
+                return $validator;
+            }
+
+            $validated = $validator->validated();
+            $validated['keepz_receiver_type'] = KeepzReceiver::TYPE_IBAN;
+            $validated['keepz_receiver_identifier'] = KeepzReceiver::normalizeIdentifier(
+                $validated['keepz_receiver_identifier'],
+                KeepzReceiver::TYPE_IBAN
+            );
+
+            if (! KeepzReceiver::isValid(
+                $validated['keepz_receiver_type'],
+                $validated['keepz_receiver_identifier']
+            )) {
+                $validator->errors()->add(
+                    'keepz_receiver_identifier',
+                    'Enter a valid Georgian IBAN in the format GE00AA0000000000000000.'
+                );
+
+                return $validator;
+            }
+
+            $validated['keepz_receiver_identifier_masked'] = KeepzReceiver::mask(
+                $validated['keepz_receiver_type'],
+                $validated['keepz_receiver_identifier']
+            );
+
+            return $validated;
+        }
+
+        $rules = $type === 'bank account'
+            ? [
+                'account_name' => 'required|string|max:120',
+                'bank_name' => 'required|string|max:120',
+                'branch_name' => 'nullable|string|max:120',
+                'account_number' => 'required|string|max:80',
+                'iban' => 'nullable|string|max:40',
+                'swift_code' => 'nullable|string|max:20',
+            ]
+            : [
+                'email' => 'required|string|max:190',
+                'note' => 'nullable|string|max:1000',
+            ];
+
+        $validator = Validator::make($methodData, $rules);
+
+        return $validator->fails() ? $validator : $validator->validated();
     }
 }
