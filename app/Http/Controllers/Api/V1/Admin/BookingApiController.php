@@ -750,7 +750,7 @@ class BookingApiController extends Controller
         $validator = Validator::make($request->all(), [
             'booking_id' => 'required|exists:bookings,id',
             'token' => 'required|exists:app_users,token',
-            'payment_method' => 'required|string',
+            'payment_method' => 'required|string|in:cash',
         ]);
 
         if ($validator->fails()) {

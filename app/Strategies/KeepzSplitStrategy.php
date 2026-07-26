@@ -102,7 +102,7 @@ class KeepzSplitStrategy implements PaymentStrategy
                 return redirect('/payment_success?bookingId='.urlencode((string) $booking->id));
             }
 
-            if (in_array($status, ['initial', 'processing'], true) || $status === null) {
+            if (! in_array($status, ['failed', 'failure', 'canceled', 'cancelled', 'expired'], true)) {
                 $freshAttempt = $existingAttempt->fresh() ?? $existingAttempt;
                 $metadata = $this->transactionMetadata($freshAttempt);
                 $checkoutUrl = data_get($metadata, 'checkout_url');

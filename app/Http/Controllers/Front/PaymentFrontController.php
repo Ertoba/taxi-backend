@@ -177,6 +177,13 @@ class PaymentFrontController extends Controller
             ],
         ];
 
+        if ($paymentMethods['keepz']['active']) {
+            return view('Front.payment-redirect', [
+                'bookingId' => $bookingId,
+                'method' => 'keepz',
+            ]);
+        }
+
         return view('Front.payment', compact('bookingId', 'paymentMethods'));
     }
 

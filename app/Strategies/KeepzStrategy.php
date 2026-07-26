@@ -7,6 +7,7 @@ use App\Models\Booking;
 use App\Models\GeneralSetting;
 use App\Models\Transaction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -48,6 +49,23 @@ class KeepzStrategy implements PaymentStrategy
 
     public function process($bookingId, $bookingData, $request)
     {
+        $lock = Cache::lock('keepz-booking:'.(string) $bookingId, 30);
+        if (! $lock->get()) {
+            return redirect('/invalid-order')->with(
+                'error',
+                'A Keepz payment is already being prepared for this ride. Please wait and try again.'
+            );
+        }
+
+        try {
+            return $this->processPayment($bookingId, $bookingData);
+        } finally {
+            optional($lock)->release();
+        }
+    }
+
+    private function processPayment($bookingId, $bookingData)
+    {
         if (! $this->isConfigured()) {
             Log::warning('Keepz payment was requested before configuration was complete.');
 
@@ -61,7 +79,38 @@ class KeepzStrategy implements PaymentStrategy
             return redirect('/invalid-order')->with('error', 'This payment cannot be processed by Keepz.');
         }
 
+        $existingAttempt = $this->latestActiveTransaction((int) $bookingId);
+        if ($existingAttempt) {
+            $status = $this->verifyAndApplyStatus(
+                $bookingId,
+                (string) $existingAttempt->transaction_id
+            );
+
+            if ($status === 'success') {
+                return redirect('/payment_success?bookingId='.urlencode((string) $bookingId));
+            }
+
+            if (! in_array($status, ['failed', 'failure', 'canceled', 'cancelled', 'expired'], true)) {
+                $freshAttempt = $existingAttempt->fresh() ?? $existingAttempt;
+                $existingMetadata = $this->transactionMetadata($freshAttempt);
+                $checkoutUrl = data_get($existingMetadata, 'checkout_url')
+                    ?? $this->redirectUrlFromResponse($existingMetadata);
+                if (is_string($checkoutUrl) && filter_var($checkoutUrl, FILTER_VALIDATE_URL)) {
+                    return redirect()->away($checkoutUrl);
+                }
+
+                return redirect('/invalid-order')->with(
+                    'error',
+                    'The existing Keepz payment is still being verified. Please try again shortly.'
+                );
+            }
+        }
+
         $integratorOrderId = (string) Str::uuid();
+        $metadata = [
+            'integrator_order_id' => $integratorOrderId,
+            'created_at' => now()->toIso8601String(),
+        ];
         $transaction = new Transaction;
         $transaction->booking_id = $bookingId;
         $transaction->gateway_name = 'keepz';
@@ -69,10 +118,7 @@ class KeepzStrategy implements PaymentStrategy
         $transaction->amount = $amount;
         $transaction->currency_code = $currency;
         $transaction->payment_status = 'pending';
-        $transaction->response_data = json_encode([
-            'integrator_order_id' => $integratorOrderId,
-            'created_at' => now()->toIso8601String(),
-        ], JSON_UNESCAPED_SLASHES);
+        $transaction->response_data = json_encode($metadata, JSON_UNESCAPED_SLASHES);
         $transaction->save();
 
         $payload = [
@@ -103,7 +149,13 @@ class KeepzStrategy implements PaymentStrategy
         $response = $this->sendEncryptedRequest('POST', '/api/integrator/order', $payload);
         $redirectUrl = $this->redirectUrlFromResponse($response);
 
-        $transaction->response_data = json_encode($this->safeGatewayPayload($response), JSON_UNESCAPED_SLASHES);
+        $transaction->response_data = json_encode(array_merge(
+            $metadata,
+            [
+                'checkout_url' => $redirectUrl,
+                'gateway_create_response' => $this->safeGatewayPayload($response),
+            ]
+        ), JSON_UNESCAPED_SLASHES);
         $transaction->payment_status = $redirectUrl ? 'pending' : 'failed';
         $transaction->save();
 
@@ -118,6 +170,29 @@ class KeepzStrategy implements PaymentStrategy
         }
 
         return redirect()->away($redirectUrl);
+    }
+
+    private function latestActiveTransaction(int $bookingId): ?Transaction
+    {
+        return Transaction::query()
+            ->where('booking_id', $bookingId)
+            ->where('gateway_name', 'keepz')
+            ->whereIn('payment_status', ['pending', 'initial', 'processing'])
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn (Transaction $transaction): bool => ! $this->transactionContainsSplitMetadata($transaction));
+    }
+
+    private function transactionContainsSplitMetadata(Transaction $transaction): bool
+    {
+        return ($this->transactionMetadata($transaction)['keepz_split'] ?? false) === true;
+    }
+
+    private function transactionMetadata(Transaction $transaction): array
+    {
+        $decoded = json_decode((string) $transaction->response_data, true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     public function return($bookingId, $requestData)
