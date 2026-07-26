@@ -88,7 +88,13 @@ class BookingApiController extends Controller
         $booking->total = $pricing['gross_price'];
         $booking->wall_amt = $pricing['wallet_amount'];
         $booking->payment_status = 'notpaid';
-        $booking->payment_method = '';
+        $requestedPaymentMethod = strtolower(trim((string) $request->input('payment_method')));
+        $onlinePaymentsEnabled = strtolower((string) GeneralSetting::getMetaValue('onlinepayment')) === 'active';
+        $keepzEnabled = strtolower((string) GeneralSetting::getMetaValue('keepz_status')) === 'active';
+        $onlinePaymentSelected = $onlinePaymentsEnabled
+            && $keepzEnabled
+            && in_array($requestedPaymentMethod, ['online', 'card', 'keepz'], true);
+        $booking->payment_method = $onlinePaymentSelected ? 'keepz' : 'cash';
         $booking->currency_code = $request->currency_code ?? 'USD';
         $booking->coupon_code = $pricing['coupon_code'];
         $booking->coupon_discount = $pricing['coupon_discount'];
@@ -163,29 +169,23 @@ class BookingApiController extends Controller
             ->whereIn('status', ['Ongoing', 'Arrived', 'Accepted', 'Completed'])
             ->count();
 
-        // $onlinePyament = $request->onlinepayment;
-        $onlinePyament = 'Inactive';
-        if ($onlinePyament == 'Inactive') {
-            $booking->payment_status = 'notpaid';
-            $booking->payment_method = 'cash';
-            // $template_id = 10;
-            $booking->save();
-            $firstBookingCoupon = GeneralSetting::where('meta_key', 'first_booking_coupon')->value('meta_value');
+        $booking->payment_status = 'notpaid';
+        $booking->save();
+        $firstBookingCoupon = GeneralSetting::where('meta_key', 'first_booking_coupon')->value('meta_value');
 
-            $responseData = [
-                'booking_id' => $booking->id,
-                'ride_id' => $booking->extension->ride_id ?? 0,
-                'booking_token' => $booking->token ?? 0,
-                'pickup_otp' => $booking->extension->pick_otp ?? 0,
-                'drop_otp' => $booking->extension->drop_otp ?? 0,
-                'status' => $booking->status,
-                'bookingCount' => $bookingCount ?? 0,
-                'coupon' => $firstBookingCoupon ?: null,
-                'payment_url' => route('payment_methods', ['booking' => $booking->id]),
-            ];
+        $responseData = [
+            'booking_id' => $booking->id,
+            'ride_id' => $booking->extension->ride_id ?? 0,
+            'booking_token' => $booking->token ?? 0,
+            'pickup_otp' => $booking->extension->pick_otp ?? 0,
+            'drop_otp' => $booking->extension->drop_otp ?? 0,
+            'status' => $booking->status,
+            'bookingCount' => $bookingCount ?? 0,
+            'coupon' => $firstBookingCoupon ?: null,
+            'payment_url' => route('payment_methods', ['booking' => $booking->id]),
+        ];
 
-            return $this->addSuccessResponse(200, trans('global.booked_succesfully'), $responseData);
-        }
+        return $this->addSuccessResponse(200, trans('global.booked_succesfully'), $responseData);
     }
 
     private function sendPickupOtpSms(Booking $booking, BookingExtension $bookingExtension, int $userId): void

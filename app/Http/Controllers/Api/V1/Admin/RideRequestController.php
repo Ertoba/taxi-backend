@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\Traits\PushNotificationTrait;
 use App\Http\Controllers\Traits\ResponseTrait;
 use App\Http\Controllers\Traits\SMSTrait;
+use App\Models\BookingExtension;
 use App\Models\RideRequest;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -62,12 +63,38 @@ class RideRequestController extends Controller
         $validated = $request->validate([
             'ride_id' => ['required', 'string', 'max:128'],
             'rider_id' => ['nullable', 'string', 'max:128'],
-            'rider_phone' => ['required', 'string', 'max:32'],
+            'rider_phone' => ['nullable', 'string', 'max:32'],
             'rider_phone_country' => ['nullable', 'string', 'max:8'],
-            'pickup_otp' => ['required', 'digits_between:4,8'],
+            'pickup_otp' => ['nullable', 'digits_between:4,8'],
         ]);
 
         $rideId = trim((string) $validated['ride_id']);
+        $extension = BookingExtension::with('booking.user')
+            ->where('ride_id', $rideId)
+            ->latest('id')
+            ->first();
+
+        if ($extension?->booking) {
+            if ((string) $extension->booking->host_id !== (string) $driver->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This ride is not assigned to the authenticated driver.',
+                ], 403);
+            }
+
+            $validated['rider_id'] = (string) ($extension->booking->userid ?? $validated['rider_id'] ?? '');
+            $validated['pickup_otp'] = (string) ($extension->pick_otp ?? $validated['pickup_otp'] ?? '');
+            $validated['rider_phone'] = (string) ($extension->booking->user?->phone ?? $validated['rider_phone'] ?? '');
+            $validated['rider_phone_country'] = (string) ($extension->booking->user?->phone_country ?? $validated['rider_phone_country'] ?? '');
+        }
+
+        if (empty($validated['pickup_otp']) || empty($validated['rider_phone'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pickup verification data is not ready yet.',
+            ], 409);
+        }
+
         $countryCode = preg_replace('/\D+/', '', (string) ($validated['rider_phone_country'] ?? '')) ?? '';
         $phone = preg_replace('/\D+/', '', (string) $validated['rider_phone']) ?? '';
 
