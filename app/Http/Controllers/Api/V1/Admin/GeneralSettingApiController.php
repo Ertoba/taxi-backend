@@ -61,6 +61,7 @@ class GeneralSettingApiController extends Controller
                     'use_google_after_pickup',
                     'use_google_before_pickup',
                     'minimum_hits_time',
+                    'minimum_negative_balance',
                     'use_google_source_destination',
                 ];
 
@@ -77,7 +78,10 @@ class GeneralSettingApiController extends Controller
                 return array_merge($metaData, $otherInfoData);
             });
             $metaData['last_active'] = '0';
-            $metaData['minimum_negative_balance'] = '9';
+            $metaData['minimum_negative_balance'] = (string) max(
+                25,
+                (float) ($metaData['minimum_negative_balance'] ?? 25)
+            );
 
             return $this->addSuccessResponse(200, trans('front.Result_found'), ['metaData' => $metaData]);
         } catch (\Exception $e) {

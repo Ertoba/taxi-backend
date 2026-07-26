@@ -24,7 +24,9 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
 
-        $schedule->job(new DistributeVendorCommissionJob)->cron('* * * * *');
+        $schedule->job(new DistributeVendorCommissionJob)
+            ->everyMinute()
+            ->withoutOverlapping();
         $schedule->command('payments:reconcile-keepz-split')
             ->everyFiveMinutes()
             ->withoutOverlapping();

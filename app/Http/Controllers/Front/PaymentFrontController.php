@@ -31,7 +31,7 @@ class PaymentFrontController extends Controller
         if (! $bookingData) {
             return redirect('/invalid-order')->with('error', 'Invalid booking ID');
         }
-        if ($bookingData->payment_status === 'paid') {
+        if (strtolower(trim((string) $bookingData->payment_status)) === 'paid') {
             return redirect('/invalid-order')->with('error', 'Invalid booking ID');
         }
 
@@ -117,7 +117,10 @@ class PaymentFrontController extends Controller
             ? Booking::find($bookingId)
             : null;
 
-        if (! $booking || $booking->payment_status === 'paid') {
+        if (
+            ! $booking
+            || strtolower(trim((string) $booking->payment_status)) === 'paid'
+        ) {
             return redirect('/invalid-order')->with('error', 'Invalid booking ID');
         }
 
@@ -194,7 +197,10 @@ class PaymentFrontController extends Controller
             ? Booking::find($bookingId)
             : null;
 
-        if (! $booking || $booking->payment_status !== 'paid') {
+        if (
+            ! $booking
+            || strtolower(trim((string) $booking->payment_status)) !== 'paid'
+        ) {
             return redirect()->route('payment_fail', ['bookingId' => $bookingId]);
         }
 

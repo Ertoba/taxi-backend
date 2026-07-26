@@ -23,6 +23,7 @@ use App\Models\Modern\Item;
 use App\Models\Modern\ItemType;
 use App\Models\Review;
 use App\Models\VendorWallet;
+use App\Services\PickupOtpService;
 use Carbon\Carbon;
 use DB;
 use Illuminate\Http\Request;
@@ -146,7 +147,7 @@ class BookingApiController extends Controller
         $bookingExtension->service_type_id = $request->service_type_id ?? '1';
         $bookingExtension->save();
 
-        $this->sendPickupOtpSms($booking, $bookingExtension, $userId);
+        app(PickupOtpService::class)->send($booking, $bookingExtension);
 
         if ($booking->wall_amt > 0) {
             $this->addWalletTransaction($userId, $booking->wall_amt, 'debit', 'Wallet used for ride #'.$booking->id);
@@ -186,33 +187,6 @@ class BookingApiController extends Controller
         ];
 
         return $this->addSuccessResponse(200, trans('global.booked_succesfully'), $responseData);
-    }
-
-    private function sendPickupOtpSms(Booking $booking, BookingExtension $bookingExtension, int $userId): void
-    {
-        $rider = AppUser::find($userId);
-        if (! $rider || empty($rider->phone) || empty($bookingExtension->pick_otp)) {
-            return;
-        }
-
-        $countryCode = preg_replace('/\D+/', '', (string) $rider->phone_country) ?? '';
-        $phone = preg_replace('/\D+/', '', (string) $rider->phone) ?? '';
-        if ($countryCode !== '' && ! str_starts_with($phone, $countryCode)) {
-            $phone = $countryCode.$phone;
-        }
-
-        try {
-            $this->sendSMS(
-                'Mili Taxi',
-                'Mili Taxi ride #'.$booking->id.' pickup PIN: '.$bookingExtension->pick_otp,
-                $phone
-            );
-        } catch (\Throwable $exception) {
-            Log::warning('Ride pickup OTP SMS could not be sent.', [
-                'booking_id' => $booking->id,
-                'exception' => $exception->getMessage(),
-            ]);
-        }
     }
 
     private function calculateCommissions($basePrice, $itemTypeId)
@@ -401,8 +375,6 @@ class BookingApiController extends Controller
 
     public function confirmBookingByHost(Request $request)
     {
-
-        Log::info('Confirm Booking Request Received', $request->all());
         $validator = Validator::make($request->all(), [
             'booking_id' => 'required|exists:bookings,id',
             'token' => 'required|exists:app_users,token',
@@ -421,17 +393,20 @@ class BookingApiController extends Controller
         $userId = $user->id;
         $booking = Booking::where('id', $bookingId)
             ->where('host_id', $userId)
-            ->where('status', '<>', 'Confirmed')
+            ->whereIn('status', ['Accepted', 'Arrived'])
             ->first();
 
         if (! $booking) {
-            return $this->addErrorResponse(500, trans('global.booking_not_found_or_not_editable'), '');
+            return $this->addErrorResponse(409, trans('global.booking_not_found_or_not_editable'), '');
         }
         $bookingExtension = BookingExtension::where('booking_id', $bookingId)->first();
         if (! $bookingExtension) {
             return $this->addErrorResponse(404, trans('global.booking_extension_not_found'), '');
         }
-        if ($bookingExtension->pick_otp !== $request->pickup_otp) {
+        if (! hash_equals(
+            (string) $bookingExtension->pick_otp,
+            trim((string) $request->pickup_otp)
+        )) {
             return $this->addErrorResponse(400, trans('global.invalid_otp'), '');
         }
         $imageFields = [
@@ -662,7 +637,7 @@ class BookingApiController extends Controller
         $validator = Validator::make($request->all(), [
             'booking_id' => 'required|exists:bookings,id',
             'token' => 'required|exists:app_users,token',
-            'status' => 'required|string|in:Pending,Ongoing,Accepted,Rejected,Completed,Cancelled',
+            'status' => 'required|string|in:Pending,Ongoing,Accepted,Arrived,pick_up,Rejected,Completed,Cancelled',
             'estimated_duration_min' => 'nullable|integer|min:1',
             'drop_otp' => 'nullable|string',
 
@@ -694,7 +669,16 @@ class BookingApiController extends Controller
                 return $this->addErrorResponse(400, trans('global.invalid_otp'), '');
             }
         }
-        $booking->status = $request->input('status');
+        $requestedStatus = $request->input('status') === 'pick_up'
+            ? 'Arrived'
+            : $request->input('status');
+        if (
+            in_array($booking->status, ['Completed', 'Cancelled', 'Rejected'], true)
+            && $booking->status !== $requestedStatus
+        ) {
+            return $this->addErrorResponse(409, trans('global.booking_not_found_or_not_editable'), '');
+        }
+        $booking->status = $requestedStatus;
         if ($request->has('firebase_json')) {
             $booking->firebase_json = json_encode($request->input('firebase_json'));
         }
@@ -719,7 +703,7 @@ class BookingApiController extends Controller
         $validator = Validator::make($request->all(), [
             'booking_id' => 'required|exists:bookings,id',
             'token' => 'required|exists:app_users,token',
-            'status' => 'required|string',
+            'status' => 'required|string|in:Cancelled',
         ]);
 
         if ($validator->fails()) {
@@ -736,7 +720,17 @@ class BookingApiController extends Controller
         if (! $booking) {
             return $this->addErrorResponse(404, trans('global.booking_not_found'), '');
         }
-        $booking->status = $request->input('status');
+        if ($booking->status === 'Cancelled') {
+            return $this->addSuccessResponse(200, trans('global.booking_status_updated_successfully'), [
+                'booking_id' => $booking->id,
+                'status' => $booking->status,
+            ]);
+        }
+        if (! in_array($booking->status, ['Pending', 'Accepted', 'Arrived'], true)) {
+            return $this->addErrorResponse(409, trans('global.booking_not_found_or_not_editable'), '');
+        }
+
+        $booking->status = 'Cancelled';
         $booking->save();
 
         return $this->addSuccessResponse(200, trans('global.booking_status_updated_successfully'), [
@@ -760,24 +754,56 @@ class BookingApiController extends Controller
         if (! $userid) {
             return $this->addErrorResponse(419, trans('global.token_not_match'), '');
         }
-        $booking = Booking::where('id', $request->input('booking_id'))
-            ->where('host_id', $userid)
-            ->first();
+        $result = DB::transaction(function () use ($request, $userid) {
+            $booking = Booking::where('id', $request->input('booking_id'))
+                ->where('host_id', $userid)
+                ->lockForUpdate()
+                ->first();
 
-        if (! $booking) {
+            if (! $booking) {
+                return null;
+            }
+
+            $requestedMethod = strtolower($request->input('payment_method'));
+            $currentMethod = strtolower((string) $booking->payment_method);
+
+            // Mobile networks can retry the same Collect request after the
+            // server committed it. Treat that exact retry as success, while
+            // rejecting a conflicting attempt to replace a verified online
+            // payment with cash.
+            if (strtolower(trim((string) $booking->payment_status)) === 'paid') {
+                return [
+                    'booking' => $booking,
+                    'idempotent' => $currentMethod === $requestedMethod,
+                ];
+            }
+
+            $booking->payment_status = 'paid';
+            $booking->payment_method = $requestedMethod;
+            $booking->save();
+
+            return [
+                'booking' => $booking,
+                'idempotent' => false,
+            ];
+        });
+
+        if (! $result) {
             return $this->addErrorResponse(404, trans('global.booking_not_found'), '');
         }
-        if ($booking->payment_status == 'paid') {
-            return $this->addErrorResponse(400, trans('global.payment_status_already_paid'), '');
+
+        if ($result['booking']->payment_status === 'paid' && ! $result['idempotent']
+            && strtolower((string) $result['booking']->payment_method) !== strtolower($request->input('payment_method'))) {
+            return $this->addErrorResponse(409, trans('global.payment_status_already_paid'), '');
         }
-        $booking->payment_status = 'paid';
-        $booking->payment_method = $request->input('payment_method');
-        $booking->save();
+
+        $booking = $result['booking'];
 
         return $this->addSuccessResponse(200, trans('global.payment_status_updated_successfully'), [
             'booking_id' => $booking->id,
             'payment_status' => $booking->payment_status,
             'payment_method' => $booking->payment_method,
+            'idempotent' => $result['idempotent'],
         ]);
     }
 
@@ -785,7 +811,7 @@ class BookingApiController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'booking_id' => 'required|exists:bookings,id',
-            'payment_method' => 'required',
+            'payment_method' => 'required|string|in:keepz,online,card',
             'token' => 'required|exists:app_users,token',
         ]);
 
@@ -797,27 +823,53 @@ class BookingApiController extends Controller
         if (! $userid) {
             return $this->addErrorResponse(419, trans('global.token_not_match'), '');
         }
-        $existingBooking = Booking::where('id', $request->input('booking_id'))
-            ->where('userid', $userid)
-            ->first();
+        $onlinePaymentsEnabled = strtolower((string) GeneralSetting::getMetaValue('onlinepayment')) === 'active';
+        $keepzEnabled = strtolower((string) GeneralSetting::getMetaValue('keepz_status')) === 'active';
+        if (! $onlinePaymentsEnabled || ! $keepzEnabled) {
+            return $this->addErrorResponse(422, 'Keepz card payments are not active.', '');
+        }
 
-        if (! $existingBooking) {
+        $booking = DB::transaction(function () use ($request, $userid) {
+            $lockedBooking = Booking::where('id', $request->input('booking_id'))
+                ->where('userid', $userid)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $lockedBooking) {
+                return null;
+            }
+
+            $paymentStatus = strtolower(trim((string) $lockedBooking->payment_status));
+            $paymentMethod = strtolower(trim((string) $lockedBooking->payment_method));
+
+            if ($paymentStatus === 'paid') {
+                return 'paid';
+            }
+
+            if ($paymentStatus === 'pending' && $paymentMethod === 'keepz') {
+                return $lockedBooking;
+            }
+
+            if ($paymentStatus !== 'notpaid') {
+                return 'invalid';
+            }
+
+            $lockedBooking->payment_status = 'pending';
+            $lockedBooking->payment_method = 'keepz';
+            $lockedBooking->save();
+
+            return $lockedBooking;
+        });
+
+        if ($booking === null) {
             return $this->addErrorResponse(404, trans('global.booking_not_found'), '');
         }
-        if ($existingBooking->payment_status == 'Paid') {
-            return $this->addErrorResponse(400, trans('global.payment_already_processed'), '');
+        if ($booking === 'paid') {
+            return $this->addErrorResponse(409, trans('global.payment_already_processed'), '');
         }
-        $booking = Booking::where('id', $request->input('booking_id'))
-            ->where('userid', $userid)
-            ->where('payment_status', 'notpaid')
-            ->first();
-
-        if (! $booking) {
-            return $this->addErrorResponse(400, trans('global.booking_payment_status_invalid'), '');
+        if ($booking === 'invalid') {
+            return $this->addErrorResponse(409, trans('global.booking_payment_status_invalid'), '');
         }
-        $booking->payment_status = 'pending';
-        $booking->payment_method = $request->payment_method;
-        $booking->save();
 
         return $this->addSuccessResponse(200, trans('global.payment_status_updated_successfully'), [
             'booking_id' => $booking->id,

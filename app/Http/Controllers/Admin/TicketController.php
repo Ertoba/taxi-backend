@@ -19,11 +19,12 @@ class TicketController extends Controller
     public function index(Request $request)
     {
         $module = Module::where('default_module', '1')->first();
-        $moduleId = $module->id;
-        $moduleName = $module->name;
+        $moduleId = $module?->id;
+        $moduleName = $module?->name ?? 'RideOn';
         $status = request()->input('status');
 
-        $query = SupportTicket::where('module', $moduleId)
+        $query = SupportTicket::query()
+            ->when($moduleId, fn ($builder) => $builder->where('module', $moduleId))
             ->with(['appUser:id,first_name,last_name'])
             ->orderBy('id', 'desc');
 
@@ -49,7 +50,7 @@ class TicketController extends Controller
     public function reply(Request $request, $id)
     {
 
-        $data = SupportTicket::with(['replies.AppUser'])
+        $data = SupportTicket::with(['replies.appUser'])
             ->where('id', $id)
             ->firstOrFail();
 
@@ -61,10 +62,7 @@ class TicketController extends Controller
     public function threads(Request $request, $id)
     {
 
-        if (Auth::check()) {
-
-            $userId = Auth::id();
-        }
+        $userId = Auth::id();
         $adminedata = User::find($userId);
 
         $supportTicketData = SupportTicket::where('id', $id)->first();
@@ -78,12 +76,10 @@ class TicketController extends Controller
 
     public function create(Request $request, $id)
     {
+        $request->validate(['message' => 'required|string|max:2000']);
         $status = 1;
         $admin = 1;
-        if (Auth::check()) {
-
-            $userId = Auth::id();
-        }
+        $userId = Auth::id();
 
         $add = new SupportTicketReply;
         $add->thread_id = $id;
@@ -91,15 +87,38 @@ class TicketController extends Controller
         $add->is_admin_reply = $admin;
         $add->message = $request->message;
         $add->reply_status = $status;
+        $add->source = 'operator';
         $add->save();
 
-        $ticket = SupportTicket::where('id', $id)->first();
+        $ticket = SupportTicket::findOrFail($id);
+        $ticket->update([
+            'operator_active' => true,
+            'ai_enabled' => false,
+            'last_message_at' => now(),
+        ]);
 
         $templateId = 42;
         $this->sendNotificationOnTicketReply($id, $ticket->user_id, $ticket->title, $templateId);
 
         return redirect()->route('admin.ticket.thread', $id);
 
+    }
+
+    public function mode(Request $request, $id)
+    {
+        $request->validate(['mode' => 'required|in:ai,operator']);
+        $ticket = SupportTicket::findOrFail($id);
+        $operator = $request->input('mode') === 'operator';
+        $ticket->update([
+            'operator_active' => $operator,
+            'ai_enabled' => ! $operator,
+        ]);
+
+        return redirect()
+            ->route('admin.ticket.thread', $id)
+            ->with('message', $operator
+                ? 'Operator mode enabled.'
+                : 'AI assistant enabled until an operator replies.');
     }
 
     public function destroy($id)

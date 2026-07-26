@@ -31,6 +31,6 @@ class PayoutApiController extends Controller
         $payoutStatus = 'Pending';
         $totalPayoutMoney = Payout::where('vendorid', $user->id)->where('payout_status', $payoutStatus)->sum('amount');
 
-        return $this->addSuccessResponse(200, trans('global.Result_found'), ['total_payout_amount' => $totalPayoutAmount]);
+        return $this->addSuccessResponse(200, trans('global.Result_found'), ['total_payout_amount' => $totalPayoutMoney]);
     }
 }

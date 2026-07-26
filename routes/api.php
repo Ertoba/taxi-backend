@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\Auth\TokenController;
 use App\Http\Controllers\Api\V1\Admin\KeepzSettlementApiController;
+use App\Http\Controllers\Api\V1\Admin\CommissionSettlementApiController;
+use App\Http\Controllers\Api\V1\Admin\SupportChatApiController;
 use App\Http\Controllers\Api\V1\Admin\RideRequestController;
 use App\Http\Controllers\Api\V1\Admin\SliderApiController;
 use App\Http\Controllers\Front\PaymentFrontController;
@@ -50,16 +52,16 @@ Route::group(['prefix' => 'v1', 'as' => 'api.', 'namespace' => 'Api\V1\Admin', '
     Route::post('/resetPassword', 'AppUsersApiController@resetPassword');
     Route::post('/emailcheck', 'AppUsersApiController@emailcheck');
     Route::post('/mobilecheck', 'AppUsersApiController@mobilecheck');
-    Route::post('/ResendOtp ', 'AppUsersApiController@ResendOtp');
-    Route::post('/ResendToken ', 'AppUsersApiController@ResendToken');
-    Route::post('/updatePassword ', 'AppUsersApiController@updatePassword');
-    Route::post('/getUserWallet ', 'AppUsersApiController@getUserWallet');
-    Route::post('/getUserWalletTransactions ', 'AppUsersApiController@getUserWalletTransactions');
+    Route::post('/ResendOtp', 'AppUsersApiController@ResendOtp');
+    Route::post('/ResendToken', 'AppUsersApiController@ResendToken');
+    Route::post('/updatePassword', 'AppUsersApiController@updatePassword');
+    Route::post('/getUserWallet', 'AppUsersApiController@getUserWallet');
+    Route::post('/getUserWalletTransactions', 'AppUsersApiController@getUserWalletTransactions');
 
-    Route::post('/getVendorWallet ', 'AppUsersApiController@getVendorWallet');
-    Route::post('/getVendorWalletTransactions ', 'AppUsersApiController@getVendorWalletTransactions');
-    Route::post('/insertPayout ', 'AppUsersApiController@insertPayout');
-    Route::post('/getPayoutTransactions ', 'AppUsersApiController@getPayoutTransactions');
+    Route::post('/getVendorWallet', 'AppUsersApiController@getVendorWallet');
+    Route::post('/getVendorWalletTransactions', 'AppUsersApiController@getVendorWalletTransactions');
+    Route::post('/insertPayout', 'AppUsersApiController@insertPayout');
+    Route::post('/getPayoutTransactions', 'AppUsersApiController@getPayoutTransactions');
 
     // payoutMethod
     Route::post('/update-payout-method', 'PayoutMethodApiController@updatePayoutMethod');
@@ -67,17 +69,23 @@ Route::group(['prefix' => 'v1', 'as' => 'api.', 'namespace' => 'Api\V1\Admin', '
     Route::get('/get-payout-types', 'PayoutMethodApiController@getPayoutTypes');
     Route::post('/get-keepz-split-settlements', [KeepzSettlementApiController::class, 'index'])
         ->middleware('throttle:30,1');
+    Route::post('/commission-settlements', [CommissionSettlementApiController::class, 'store'])
+        ->middleware('throttle:5,1');
+    Route::post('/support-chat', [SupportChatApiController::class, 'show'])
+        ->middleware('throttle:30,1');
+    Route::post('/support-chat/messages', [SupportChatApiController::class, 'store'])
+        ->middleware('throttle:20,1');
 
-    Route::post('/getDriverEarings ', 'DriverFinanceApiController@getDriverEarings');
+    Route::post('/getDriverEarings', 'DriverFinanceApiController@getDriverEarings');
 
-    Route::post('/deleteAccount ', 'AppUsersApiController@deleteAccount');
+    Route::post('/deleteAccount', 'AppUsersApiController@deleteAccount');
     Route::post('/addEditVerificationDocuments', 'AppUsersApiController@addEditVerificationDocuments');
     Route::post('/getVerificationDocuments', 'AppUsersApiController@getVerificationDocuments');
 
     // UserProfile
-    Route::post('/getUserProfile ', 'UserProfileController@getUserProfile');
-    Route::post('/getUseritems ', 'UserProfileController@getUseritems');
-    Route::post('/getVendorItemReviews ', 'UserProfileController@getVendorItemReviews');
+    Route::post('/getUserProfile', 'UserProfileController@getUserProfile');
+    Route::post('/getUseritems', 'UserProfileController@getUseritems');
+    Route::post('/getVendorItemReviews', 'UserProfileController@getVendorItemReviews');
 
     // Cities
     Route::get('/yourLocations', 'CitiesApiController@yourLocations');

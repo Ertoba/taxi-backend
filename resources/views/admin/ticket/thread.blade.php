@@ -6,6 +6,20 @@
     <div class="col-lg-2">    {{ trans('global.description') }}  :</div>
     <div class="col-lg-4">{{ $supportTicketData->description ?? '' }}</div>
 </div>
+<div class="row" style="margin-bottom:15px">
+    <div class="col-lg-12">
+        <form method="POST" action="{{ route('admin.ticket.thread.mode', $id) }}" style="display:inline">
+            @csrf
+            <input type="hidden" name="mode" value="{{ $supportTicketData->operator_active ? 'ai' : 'operator' }}">
+            <button class="btn {{ $supportTicketData->operator_active ? 'btn-info' : 'btn-warning' }}" type="submit">
+                {{ $supportTicketData->operator_active ? 'Enable AI assistant' : 'Take over as operator' }}
+            </button>
+        </form>
+        <span class="label {{ $supportTicketData->operator_active ? 'label-warning' : 'label-info' }}">
+            {{ $supportTicketData->operator_active ? 'Operator active' : 'AI assistant active' }}
+        </span>
+    </div>
+</div>
 
   <div class="accordion1-option">
     <a href="javascript:void(0)" class="toggle-accordion1 active" accordion1-id="#accordion1"></a>
@@ -68,6 +82,9 @@
             <div id="collapse{{ $reply->id }}" class="panel-collapse collapse in" role="tabpanel" aria-labelledby="heading{{ $reply->id }}">
                 <div class="panel-body">
                     {{ $reply->message }}
+                    @if($reply->source)
+                        <small class="text-muted">({{ strtoupper($reply->source) }})</small>
+                    @endif
                 </div>
             </div>
         </div>

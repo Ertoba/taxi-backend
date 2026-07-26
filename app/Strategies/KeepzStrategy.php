@@ -26,6 +26,17 @@ class KeepzStrategy implements PaymentStrategy
 
     private const SUPPORTED_CURRENCIES = ['GEL', 'USD', 'EUR'];
 
+    private const TERMINAL_TRANSACTION_STATUSES = [
+        'completed',
+        'failed',
+        'failure',
+        'canceled',
+        'cancelled',
+        'expired',
+        'duplicate_paid_requires_refund',
+        'ignored_already_paid',
+    ];
+
     private string $mode;
 
     private array $credentials;
@@ -62,6 +73,64 @@ class KeepzStrategy implements PaymentStrategy
         } finally {
             optional($lock)->release();
         }
+    }
+
+    public function createStandaloneOrder(
+        string $integratorOrderId,
+        float $amount,
+        string $currency,
+        string $successUrl,
+        string $failUrl,
+        string $callbackUrl
+    ): array {
+        if (! $this->isConfigured() || ! Str::isUuid($integratorOrderId)) {
+            return ['checkout_url' => null, 'payload' => []];
+        }
+
+        $currency = strtoupper($currency);
+        if ($amount <= 0 || ! in_array($currency, self::SUPPORTED_CURRENCIES, true)) {
+            return ['checkout_url' => null, 'payload' => []];
+        }
+
+        $response = $this->sendEncryptedRequest('POST', '/api/integrator/order', [
+            'amount' => round($amount, 2),
+            'receiverId' => trim($this->credentials['receiver_id']),
+            'receiverType' => strtoupper(trim($this->credentials['receiver_type'])),
+            'integratorId' => trim($this->credentials['integrator_id']),
+            'integratorOrderId' => $integratorOrderId,
+            'currency' => $currency,
+            'successRedirectUri' => $successUrl,
+            'failRedirectUri' => $failUrl,
+            'callbackUri' => $callbackUrl,
+            'language' => 'KA',
+        ]);
+
+        return [
+            'checkout_url' => $this->redirectUrlFromResponse($response),
+            'payload' => $this->safeGatewayPayload($response),
+        ];
+    }
+
+    public function verifyStandaloneOrder(string $integratorOrderId): array
+    {
+        if (! $this->isConfigured() || ! Str::isUuid($integratorOrderId)) {
+            return ['status' => null];
+        }
+
+        $response = $this->sendEncryptedRequest('GET', '/api/integrator/order/status', [
+            'integratorId' => trim($this->credentials['integrator_id']),
+            'integratorOrderId' => $integratorOrderId,
+        ]);
+
+        return [
+            'status' => $this->normalizeStatus(
+                data_get($response, 'status') ?? data_get($response, 'orderStatus')
+            ),
+            'integrator_order_id' => data_get($response, 'integratorOrderId'),
+            'amount' => data_get($response, 'amount') ?? data_get($response, 'acquiringAmount'),
+            'currency' => data_get($response, 'initialCurrency') ?? data_get($response, 'currency'),
+            'payload' => $this->safeGatewayPayload($response),
+        ];
     }
 
     private function processPayment($bookingId, $bookingData)
@@ -177,7 +246,16 @@ class KeepzStrategy implements PaymentStrategy
         return Transaction::query()
             ->where('booking_id', $bookingId)
             ->where('gateway_name', 'keepz')
-            ->whereIn('payment_status', ['pending', 'initial', 'processing'])
+            ->where(function ($query): void {
+                $query->whereNull('payment_status')
+                    ->orWhereRaw(
+                        'LOWER(TRIM(payment_status)) NOT IN ('.implode(
+                            ',',
+                            array_fill(0, count(self::TERMINAL_TRANSACTION_STATUSES), '?')
+                        ).')',
+                        self::TERMINAL_TRANSACTION_STATUSES
+                    );
+            })
             ->orderByDesc('id')
             ->get()
             ->first(fn (Transaction $transaction): bool => ! $this->transactionContainsSplitMetadata($transaction));

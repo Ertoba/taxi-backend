@@ -5,18 +5,16 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Traits\PushNotificationTrait;
 use App\Http\Controllers\Traits\ResponseTrait;
-use App\Http\Controllers\Traits\SMSTrait;
 use App\Models\BookingExtension;
 use App\Models\RideRequest;
+use App\Services\PickupOtpService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
 use Validator;
 
 class RideRequestController extends Controller
 {
-    use PushNotificationTrait, ResponseTrait, SMSTrait;
+    use PushNotificationTrait, ResponseTrait;
 
     /**
      * Notify a rider that an authenticated driver accepted the ride.
@@ -46,8 +44,7 @@ class RideRequestController extends Controller
     /**
      * Send the pickup verification PIN after a driver accepts a ride.
      *
-     * The current realtime ride flow lives in Firebase, so the authenticated
-     * driver app forwards the rider phone and PIN from that ride document.
+     * Phone/PIN data is resolved only from the server-owned booking.
      */
     public function sendPickupOtp(Request $request)
     {
@@ -62,10 +59,6 @@ class RideRequestController extends Controller
 
         $validated = $request->validate([
             'ride_id' => ['required', 'string', 'max:128'],
-            'rider_id' => ['nullable', 'string', 'max:128'],
-            'rider_phone' => ['nullable', 'string', 'max:32'],
-            'rider_phone_country' => ['nullable', 'string', 'max:8'],
-            'pickup_otp' => ['nullable', 'digits_between:4,8'],
         ]);
 
         $rideId = trim((string) $validated['ride_id']);
@@ -74,85 +67,27 @@ class RideRequestController extends Controller
             ->latest('id')
             ->first();
 
-        if ($extension?->booking) {
-            if ((string) $extension->booking->host_id !== (string) $driver->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'This ride is not assigned to the authenticated driver.',
-                ], 403);
-            }
-
-            $validated['rider_id'] = (string) ($extension->booking->userid ?? $validated['rider_id'] ?? '');
-            $validated['pickup_otp'] = (string) ($extension->pick_otp ?? $validated['pickup_otp'] ?? '');
-            $validated['rider_phone'] = (string) ($extension->booking->user?->phone ?? $validated['rider_phone'] ?? '');
-            $validated['rider_phone_country'] = (string) ($extension->booking->user?->phone_country ?? $validated['rider_phone_country'] ?? '');
-        }
-
-        if (empty($validated['pickup_otp']) || empty($validated['rider_phone'])) {
+        if (! $extension?->booking) {
             return response()->json([
                 'success' => false,
-                'message' => 'Pickup verification data is not ready yet.',
+                'message' => trans('global.pickup_verification_not_ready'),
             ], 409);
         }
 
-        $countryCode = preg_replace('/\D+/', '', (string) ($validated['rider_phone_country'] ?? '')) ?? '';
-        $phone = preg_replace('/\D+/', '', (string) $validated['rider_phone']) ?? '';
-
-        if ($countryCode !== '' && ! str_starts_with($phone, $countryCode)) {
-            $phone = $countryCode.$phone;
-        }
-
-        if (strlen($phone) < 9 || strlen($phone) > 15) {
+        if ((string) $extension->booking->host_id !== (string) $driver->id) {
             return response()->json([
                 'success' => false,
-                'message' => 'The rider phone number is invalid.',
-            ], 422);
+                'message' => 'This ride is not assigned to the authenticated driver.',
+            ], 403);
         }
 
-        $deduplicationKey = 'pickup-otp-sms:'.hash(
-            'sha256',
-            $driver->id.'|'.$rideId.'|'.$phone.'|'.$validated['pickup_otp']
-        );
+        $delivery = app(PickupOtpService::class)
+            ->send($extension->booking, $extension);
 
-        if (! Cache::add($deduplicationKey, true, now()->addSeconds(90))) {
-            return response()->json([
-                'success' => true,
-                'duplicate' => true,
-                'message' => 'The pickup verification code was already requested.',
-            ]);
-        }
+        $status = (int) ($delivery['status'] ?? ($delivery['success'] ? 200 : 502));
+        unset($delivery['status']);
 
-        try {
-            $this->sendSMS(
-                'Mili Taxi',
-                'Mili Taxi pickup PIN: '.$validated['pickup_otp'],
-                $phone
-            );
-
-            Log::info('Ride pickup OTP SMS sent.', [
-                'ride_id' => $rideId,
-                'driver_id' => $driver->id,
-                'rider_id' => $validated['rider_id'] ?? null,
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Pickup verification code sent.',
-            ]);
-        } catch (\Throwable $exception) {
-            Cache::forget($deduplicationKey);
-
-            Log::warning('Ride pickup OTP SMS could not be sent.', [
-                'ride_id' => $rideId,
-                'driver_id' => $driver->id,
-                'exception' => $exception->getMessage(),
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Unable to send the pickup verification code.',
-            ], 502);
-        }
+        return response()->json($delivery, $status);
     }
 
     /**

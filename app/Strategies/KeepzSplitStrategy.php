@@ -28,6 +28,17 @@ class KeepzSplitStrategy implements PaymentStrategy
 
     private const SUPPORTED_CURRENCIES = ['GEL', 'USD', 'EUR'];
 
+    private const TERMINAL_TRANSACTION_STATUSES = [
+        'completed',
+        'failed',
+        'failure',
+        'canceled',
+        'cancelled',
+        'expired',
+        'duplicate_paid_requires_refund',
+        'ignored_already_paid',
+    ];
+
     private string $mode;
 
     private array $credentials;
@@ -87,7 +98,7 @@ class KeepzSplitStrategy implements PaymentStrategy
             return redirect('/invalid-order')->with('error', 'The ride or driver is invalid.');
         }
 
-        if ($booking->payment_status === 'paid') {
+        if (strtolower(trim((string) $booking->payment_status)) === 'paid') {
             return redirect('/invalid-order')->with('error', 'This ride is already paid.');
         }
 
@@ -456,7 +467,16 @@ class KeepzSplitStrategy implements PaymentStrategy
         return Transaction::query()
             ->where('booking_id', $bookingId)
             ->where('gateway_name', 'keepz')
-            ->whereIn('payment_status', ['pending', 'initial', 'processing'])
+            ->where(function ($query): void {
+                $query->whereNull('payment_status')
+                    ->orWhereRaw(
+                        'LOWER(TRIM(payment_status)) NOT IN ('.implode(
+                            ',',
+                            array_fill(0, count(self::TERMINAL_TRANSACTION_STATUSES), '?')
+                        ).')',
+                        self::TERMINAL_TRANSACTION_STATUSES
+                    );
+            })
             ->orderByDesc('id')
             ->get()
             ->first(fn (Transaction $transaction): bool => $this->transactionContainsSplitMetadata($transaction));

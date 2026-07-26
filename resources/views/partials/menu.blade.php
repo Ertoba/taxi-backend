@@ -474,7 +474,7 @@
 
             @can('support_ticket')
                 <li class="{{ request()->is('admin/ticket') || request()->is('admin/ticket /*') ? 'active' : '' }}">
-                    <a href="{{ route('admin.ticket.index', ['status' => 1]) }}" style="display: none;">
+                    <a href="{{ route('admin.ticket.index', ['status' => 1]) }}">
                         <i class="fa fa-ticket" aria-hidden="true"></i>
                         <span>{{ trans('menu.tickets_title') }}</span>
                     </a>

@@ -38,6 +38,16 @@ trait NotificationTrait
             $vendorData = AppUser::with('metadata')->where('id', $vendor_id)->get();
         }
         $template = EmailSmsNotification::find($template_id);
+        $recipientLocale = (string) ($user->first()?->preferred_locale ?: app()->getLocale());
+        if ($template && $recipientLocale !== 'en') {
+            $template = EmailSmsNotification::query()
+                ->where('temp_name', $template->temp_name)
+                ->where('lang', $recipientLocale)
+                ->first() ?? $template;
+        }
+        if (! $template) {
+            return;
+        }
         if ($template->status == 0) {
             return;
         }

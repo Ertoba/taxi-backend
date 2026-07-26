@@ -70,6 +70,7 @@ class AppUser extends Authenticatable implements HasMedia
         'avr_guest_rate',
         'host_status',
         'firestore_id',
+        'preferred_locale',
         'document_verify',
         'verified',
     ];

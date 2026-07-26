@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Models\AppUser;
 use App\Models\Booking;
 use App\Models\VendorWallet;
 use Illuminate\Bus\Queueable;
@@ -10,140 +9,85 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class DistributeVendorCommissionJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function handle()
+    public function handle(): void
     {
         try {
-            DB::transaction(function () {
-                $currentDate = Carbon::now();
+            $processed = 0;
 
-                Booking::where('bookings.status', 'Completed')
-                    ->where('bookings.vendor_commission_given', 0)
-                    ->join('app_users', 'bookings.host_id', '=', 'app_users.id')
-                    ->select('bookings.*')
-                    ->chunkById(
-                        100,
-                        function ($bookings) use ($currentDate) {
-                            $walletInserts = [];
-                            $updateIds = [];
+            Booking::query()
+                ->where('status', 'Completed')
+                ->where('vendor_commission_given', 0)
+                ->orderBy('id')
+                ->chunkById(100, function ($bookings) use (&$processed): void {
+                    foreach ($bookings as $booking) {
+                        DB::transaction(function () use ($booking, &$processed): void {
+                            $lockedBooking = Booking::query()
+                                ->with('host')
+                                ->whereKey($booking->id)
+                                ->lockForUpdate()
+                                ->first();
 
-                            foreach ($bookings as $booking) {
-                                $vendorId = $booking->host_id;
-
-                                if (! AppUser::where('id', $vendorId)->exists()) {
-                                    Log::warning("Skipped wallet entries: Vendor ID {$vendorId} does not exist for Booking #{$booking->token}");
-
-                                    continue;
-                                }
-
-                                $fullAmount = $booking->total ?? 0;
-                                $adminCommission = $booking->admin_commission ?? 0;
-                                $vendorCommission = $booking->vendor_commission ?? 0;
-                                $discountAmount = $booking->discount_price ?? 0;
-
-                                if ($fullAmount <= 0) {
-                                    Log::warning("Skipped booking ID {$booking->id}: total amount invalid ({$fullAmount})");
-
-                                    continue;
-                                }
-
-                                $generateWalletToken = function () {
-                                    do {
-                                        $token = Str::upper(Str::random(10));
-                                    } while (VendorWallet::where('token', $token)->exists());
-
-                                    return $token;
-                                };
-
-                                $paymentType = $booking->payment_method === 'cash' ? 'cash' : 'online';
-
-                                $walletToken = $generateWalletToken();
-                                $walletInserts[] = [
-                                    'vendor_id' => $vendorId,
-                                    'amount' => $fullAmount,
-                                    'booking_id' => $booking->id,
-                                    'type' => 'credit',
-                                    'token' => $walletToken,
-                                    'description' => "Full booking amount (+{$fullAmount}) credited for {$paymentType} booking #{$booking->token}, Wallet #{$walletToken}",
-                                    'created_at' => $currentDate,
-                                    'updated_at' => $currentDate,
-                                ];
-
-                                if ($adminCommission > 0) {
-                                    $walletToken = $generateWalletToken();
-                                    $walletInserts[] = [
-                                        'vendor_id' => $vendorId,
-                                        'amount' => $adminCommission,
-                                        'booking_id' => $booking->id,
-                                        'type' => 'debit',
-                                        'token' => $walletToken,
-                                        'description' => "Admin commission (-{$adminCommission}) for {$paymentType} booking #{$booking->token}, Wallet #{$walletToken}",
-                                        'created_at' => $currentDate,
-                                        'updated_at' => $currentDate,
-                                    ];
-                                }
-
-                                if ($discountAmount > 0) {
-                                    $walletToken = $generateWalletToken();
-                                    $walletInserts[] = [
-                                        'vendor_id' => $vendorId,
-                                        'amount' => $discountAmount,
-                                        'booking_id' => $booking->id,
-                                        'type' => 'credit',
-                                        'token' => $walletToken,
-                                        'description' => "Discount amount ({$discountAmount}) paid by admin for booking #{$booking->token}, Wallet #{$walletToken}",
-                                        'created_at' => $currentDate,
-                                        'updated_at' => $currentDate,
-                                    ];
-                                }
-
-                                if ($booking->payment_method === 'cash' && $vendorCommission > 0) {
-                                    $walletToken = $generateWalletToken();
-                                    $totalDebit = $adminCommission + $vendorCommission - $discountAmount;
-                                    $walletInserts[] = [
-                                        'vendor_id' => $vendorId,
-                                        'amount' => $totalDebit,
-                                        'booking_id' => $booking->id,
-                                        'type' => 'debit',
-                                        'token' => $walletToken,
-                                        'description' => "Cash booking adjustment: Admin + Vendor commission (-{$totalDebit}) for booking #{$booking->token}, Wallet #{$walletToken}",
-                                        'created_at' => $currentDate,
-                                        'updated_at' => $currentDate,
-                                    ];
-                                }
-
-                                $updateIds[] = $booking->id;
+                            if (! $lockedBooking || (int) $lockedBooking->vendor_commission_given !== 0) {
+                                return;
                             }
 
-                            if ($walletInserts) {
-                                VendorWallet::insert($walletInserts);
-                            }
-
-                            if ($updateIds) {
-                                Booking::whereIn('id', $updateIds)->update([
-                                    'vendor_commission_given' => 1,
-                                    'updated_at' => $currentDate,
+                            if (! $lockedBooking->host) {
+                                Log::warning('Skipped driver ledger update because the driver is missing.', [
+                                    'booking_id' => $lockedBooking->id,
+                                    'driver_id' => $lockedBooking->host_id,
                                 ]);
-                            }
-                        },
-                        'bookings.id',
-                        'id'
-                    );
-            });
 
-            Log::info('✅ Vendor wallet updated successfully');
+                                return;
+                            }
+
+                            $paymentMethod = strtolower(trim((string) $lockedBooking->payment_method));
+                            $adminCommission = round(max(0, (float) $lockedBooking->admin_commission), 2);
+
+                            // Keepz Split transfers the driver's share directly to the configured
+                            // receiver. It is intentionally audit-only and never withdrawable here.
+                            // For cash rides, the driver already collected the fare, so only the
+                            // platform commission becomes a settlement liability.
+                            if ($paymentMethod === 'cash' && $adminCommission > 0) {
+                                $description = "Cash ride platform commission for booking #{$lockedBooking->token}";
+                                $alreadyRecorded = VendorWallet::query()
+                                    ->where('vendor_id', $lockedBooking->host_id)
+                                    ->where('booking_id', $lockedBooking->id)
+                                    ->where('type', 'debit')
+                                    ->where('description', $description)
+                                    ->exists();
+
+                                if (! $alreadyRecorded) {
+                                    VendorWallet::create([
+                                        'vendor_id' => $lockedBooking->host_id,
+                                        'amount' => $adminCommission,
+                                        'booking_id' => $lockedBooking->id,
+                                        'type' => 'debit',
+                                        'description' => $description,
+                                    ]);
+                                }
+                            }
+
+                            $lockedBooking->vendor_commission_given = 1;
+                            $lockedBooking->save();
+                            $processed++;
+                        }, 3);
+                    }
+                });
+
+            Log::info('Driver commission ledger updated.', ['processed_bookings' => $processed]);
         } catch (\Throwable $e) {
-            Log::error('❌ Vendor wallet update failed: '.$e->getMessage(), [
+            Log::error('Driver commission ledger update failed: '.$e->getMessage(), [
                 'exception' => $e,
             ]);
+
+            throw $e;
         }
     }
 }

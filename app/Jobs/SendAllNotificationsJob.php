@@ -23,6 +23,8 @@ class SendAllNotificationsJob implements ShouldQueue
 
     protected $vendorId;
 
+    protected string $locale = 'en';
+
     /**
      * Create a new job instance.
      */
@@ -33,6 +35,7 @@ class SendAllNotificationsJob implements ShouldQueue
         $this->templateId = $templateId;
         $this->data = $data;
         $this->vendorId = $vendorId;
+        $this->locale = app()->getLocale();
     }
 
     /**
@@ -40,6 +43,7 @@ class SendAllNotificationsJob implements ShouldQueue
      */
     public function handle(): void
     {
+        app()->setLocale($this->locale);
         $this->_sendAllNotificationsNow(
             $this->valuesArray,
             $this->userId,

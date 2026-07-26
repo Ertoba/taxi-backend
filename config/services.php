@@ -1,6 +1,10 @@
 <?php
 
 return [
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'model' => env('OPENAI_SUPPORT_MODEL', 'gpt-4.1-mini'),
+    ],
 
     /*
     |--------------------------------------------------------------------------

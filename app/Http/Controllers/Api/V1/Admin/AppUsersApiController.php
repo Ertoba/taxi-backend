@@ -30,6 +30,7 @@ use Carbon\Carbon;
 use Gate;
 use Hash;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -1214,11 +1215,27 @@ class AppUsersApiController extends Controller
         $refunded = $summary['refunded'];
         $incoming_amount = $summary['incoming_amount'];
         $pendingPayout = $summary['pendingPayout'];
+        $cashCommissionDue = $summary['cashCommissionDue'];
+        $commissionSettlementThreshold = $summary['commissionSettlementThreshold'];
+        $commissionSettlementAmount = $summary['commissionSettlementAmount'];
+        $canSettleCommission = $summary['canSettleCommission'];
 
         // $queries = \DB::getQueryLog(); // Get all queries
         // dd(count($queries), $queries);
 
-        return $this->addSuccessResponse(200, trans('global.vendor_Wallet_amount'), ['walletBalance' => $walletBalance, 'pendingToWithdrawl' => $pendingToWithdrawl, 'totalWithdrawled' => $totalWithdrawled, 'totalEarning' => $totalEarning, 'refunded' => $refunded, 'incoming_amount' => $incoming_amount, 'pendingPayout' => $pendingPayout]);
+        return $this->addSuccessResponse(200, trans('global.vendor_Wallet_amount'), [
+            'walletBalance' => $walletBalance,
+            'pendingToWithdrawl' => $pendingToWithdrawl,
+            'totalWithdrawled' => $totalWithdrawled,
+            'totalEarning' => $totalEarning,
+            'refunded' => $refunded,
+            'incoming_amount' => $incoming_amount,
+            'pendingPayout' => $pendingPayout,
+            'cashCommissionDue' => $cashCommissionDue,
+            'commissionSettlementThreshold' => $commissionSettlementThreshold,
+            'commissionSettlementAmount' => $commissionSettlementAmount,
+            'canSettleCommission' => $canSettleCommission,
+        ]);
         try {
         } catch (\Exception $e) {
             return $this->addErrorResponse(500, trans('global.something_wrong'), '');
@@ -1321,7 +1338,9 @@ class AppUsersApiController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'token' => ['required'],
-            'amount' => ['required', 'numeric'],
+            'amount' => ['required', 'numeric', 'min:0.01'],
+            'active_payout_method_id' => ['required', 'integer', 'exists:payout_methods,id'],
+            'currency' => ['nullable', 'string', 'size:3'],
         ]);
 
         if ($validator->fails()) {
@@ -1329,63 +1348,67 @@ class AppUsersApiController extends Controller
         }
 
         $user = AppUser::where('token', $request->input('token'))->first();
-
-        $payoutMethodId = $request->input('active_payout_method_id');
-
-        $payoutMethodDetails = PayoutMethod::find($payoutMethodId);
-        $payoutMethod = strtolower($payoutMethodDetails->name);
-
         if (! $user) {
             return $this->errorResponse(404, trans('global.User_not_found'));
         }
 
+        $payoutMethodDetails = PayoutMethod::find($request->integer('active_payout_method_id'));
+        if (! $payoutMethodDetails) {
+            return $this->errorResponse(422, trans('global.something_wrong'));
+        }
+        $payoutMethod = strtolower((string) $payoutMethodDetails->name);
+        $lock = Cache::lock('vendor-payout-request:'.$user->id, 30);
+        if (! $lock->get()) {
+            return $this->errorResponse(409, trans('global.something_wrong'));
+        }
+
         try {
-            $payoutStatus = 'Pending';
-            $totalPayoutMoney = Payout::where('vendorid', $user->id)->where('payout_status', $payoutStatus)->sum('amount');
-            $vendorWalletMoney = $this->getVendorWalletBalance($user->id);
+            $requestedAmount = round((float) $request->input('amount'), 2);
+            $payout = DB::transaction(function () use ($request, $user, $payoutMethod, $requestedAmount) {
+                AppUser::whereKey($user->id)->lockForUpdate()->firstOrFail();
 
-            $withdrawalAmount = $request->input('amount');
-
-            $withdrawalAmount = $withdrawalAmount + $totalPayoutMoney;
-
-            if ($withdrawalAmount > $vendorWalletMoney) {
-                return $this->errorResponse(404, trans('global.did_not_have_sufficient_balance'));
-            } else {
+                $pendingAmount = (float) Payout::where('vendorid', $user->id)
+                    ->where('payout_status', 'Pending')
+                    ->sum('amount');
+                $availableBalance = $this->getVendorWalletBalance($user->id);
+                if (($requestedAmount + $pendingAmount) > ($availableBalance + 0.00001)) {
+                    return null;
+                }
 
                 $payout = new Payout;
                 $payout->vendorid = $user->id;
-                $payout->amount = $request->input('amount');
-                $payout->currency = $request->input('currency');
+                $payout->amount = $requestedAmount;
+                $payout->currency = strtoupper((string) ($request->input('currency') ?: 'GEL'));
                 if ($request->has('module_id')) {
                     $payout->module = $request->input('module_id');
                 }
-                // $payout->payment_method = '';
                 $payout->payment_method = $payoutMethod;
                 $payout->payout_status = 'Pending';
                 $payout->save();
 
-                $settings = GeneralSetting::whereIn('meta_key', ['general_email', 'general_default_currency'])
-                    ->get()
-                    ->keyBy('meta_key');
+                return $payout;
+            }, 3);
 
-                $general_email = $settings['general_email'] ?? null;
-                $general_default_currency = $settings['general_default_currency'] ?? null;
-
-                $template_id = 4;
-                $valuesArray = $user->toArray();
-                $valuesArray = $user->only(['first_name', 'last_name', 'email', 'phone_country', 'phone']);
-                $valuesArray['phone'] = $valuesArray['phone_country'].$valuesArray['phone'];
-                $valuesArray['payout_amount'] = $request->input('amount');
-                $valuesArray['payout_bank'] = $payout->payment_method;
-                $valuesArray['support_email'] = $general_email->meta_value;
-                $valuesArray['currency_code'] = $general_default_currency->meta_value;
-                $valuesArray['payout_date'] = now()->format('Y-m-d');
-                $this->sendAllNotifications($valuesArray, $user->id, $template_id);
-
-                return $this->successResponse(200, trans('payout requested successfully'), ['payout' => $payout]);
+            if (! $payout) {
+                return $this->errorResponse(404, trans('global.did_not_have_sufficient_balance'));
             }
+
+            $settings = GeneralSetting::whereIn('meta_key', ['general_email', 'general_default_currency'])
+                ->pluck('meta_value', 'meta_key');
+            $valuesArray = $user->only(['first_name', 'last_name', 'email', 'phone_country', 'phone']);
+            $valuesArray['phone'] = ($valuesArray['phone_country'] ?? '').($valuesArray['phone'] ?? '');
+            $valuesArray['payout_amount'] = $requestedAmount;
+            $valuesArray['payout_bank'] = $payout->payment_method;
+            $valuesArray['support_email'] = $settings->get('general_email', '');
+            $valuesArray['currency_code'] = $settings->get('general_default_currency', 'GEL');
+            $valuesArray['payout_date'] = now()->format('Y-m-d');
+            $this->sendAllNotifications($valuesArray, $user->id, 4);
+
+            return $this->successResponse(200, trans('payout requested successfully'), ['payout' => $payout]);
         } catch (\Exception $e) {
             return $this->errorResponse(500, trans('global.something_wrong').': '.$e->getMessage());
+        } finally {
+            $lock->release();
         }
     }
 

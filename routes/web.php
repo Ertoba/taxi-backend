@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\CurrencyController;
 use App\Http\Controllers\Admin\GeneralSettingController;
 use App\Http\Controllers\Admin\UsersController;
+use App\Http\Controllers\Front\CommissionSettlementController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/privacy-policy', 'App\Http\Controllers\Front\ExternalPagesController@privacyPolicy')->name('privacy-policy');
@@ -30,6 +31,16 @@ Route::get('/payment/cancel', 'App\Http\Controllers\Front\PaymentFrontController
 Route::get('/payment_success', 'App\Http\Controllers\Front\PaymentFrontController@paymentSuccess')->name('payment_success');
 Route::get('/payment_payduniya', 'App\Http\Controllers\Front\PaymentFrontController@payment_payduniya')->name('payment_payduniya');
 Route::get('/payment_fail', 'App\Http\Controllers\Front\PaymentFrontController@paymentfail')->name('payment_fail');
+Route::get('/commission-settlement/{settlement}/return', [CommissionSettlementController::class, 'complete'])
+    ->name('commission-settlement.return');
+Route::match(['get', 'post'], '/commission-settlement/{settlement}/callback', [CommissionSettlementController::class, 'callback'])
+    ->name('commission-settlement.callback');
+Route::get('/commission-settlement/{settlement}/cancel', [CommissionSettlementController::class, 'cancel'])
+    ->name('commission-settlement.cancel');
+Route::get('/cash_commission_settlement_success', [CommissionSettlementController::class, 'success'])
+    ->name('commission-settlement.success');
+Route::get('/cash_commission_settlement_fail', [CommissionSettlementController::class, 'fail'])
+    ->name('commission-settlement.fail');
 Route::get('/testing', 'App\Http\Controllers\Front\PaymentFrontController@testing')->name('testing');
 
 // email route
@@ -426,6 +437,7 @@ Route::group(['prefix' => 'admin', 'as' => 'admin.', 'namespace' => 'Admin', 'mi
     Route::get('ticket/replies/{id}', 'TicketController@reply')->name('ticket.replies');
     Route::get('ticket/threads/{id}', 'TicketController@threads')->name('ticket.thread');
     Route::post('ticket/threads/create/{id}', 'TicketController@create')->name('ticket.thread.create');
+    Route::post('ticket/threads/{id}/mode', 'TicketController@mode')->name('ticket.thread.mode');
     Route::delete('ticket/delete/{id}', 'TicketController@destroy')->name('ticket.destroy');
     Route::post('ticket/delete-all', 'TicketController@ticketDeleteAll')->name('ticket.deleteAll');
 

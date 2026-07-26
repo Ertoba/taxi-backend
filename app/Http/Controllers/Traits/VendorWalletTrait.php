@@ -45,18 +45,17 @@ trait VendorWalletTrait
 
     public function getVendorWalletBalance($vendorId)
     {
+        $walletSums = $this->accountingWalletQuery($vendorId)
+            ->selectRaw("
+                COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0) as total_credit,
+                COALESCE(SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END), 0) as total_debit,
+                COALESCE(SUM(CASE WHEN type = 'refund' THEN amount ELSE 0 END), 0) as total_refund
+            ")
+            ->first();
 
-        $totalCredits = VendorWallet::where('vendor_id', $vendorId)
-            ->where('type', 'credit')
-            ->sum('amount');
-        $totalDebits = VendorWallet::where('vendor_id', $vendorId)
-            ->where('type', 'debit')
-            ->sum('amount');
-        $totalRefunds = VendorWallet::where('vendor_id', $vendorId)
-            ->where('type', 'refund')
-            ->sum('amount');
-
-        return $balance = $totalCredits - ($totalDebits + $totalRefunds);
+        return (float) $walletSums->total_credit
+            - (float) $walletSums->total_debit
+            - (float) $walletSums->total_refund;
     }
 
     public function addVendorWalletTransaction($vendorId, $amount, $type, $bookingId = null, $payoutId = null, $description = null)
@@ -196,18 +195,18 @@ trait VendorWalletTrait
     public function getVendorWalletSummary($vendorId)
     {
         // Get credit, debit, refund totals in one query
-        $walletSums = VendorWallet::selectRaw("
-            SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END) as total_credit,
-            SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END) as total_debit,
-            SUM(CASE WHEN type = 'refund' THEN amount ELSE 0 END) as total_refund
-        ")
-            ->where('vendor_id', $vendorId)
+        $walletSums = $this->accountingWalletQuery($vendorId)
+            ->selectRaw("
+                COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0) as total_credit,
+                COALESCE(SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END), 0) as total_debit,
+                COALESCE(SUM(CASE WHEN type = 'refund' THEN amount ELSE 0 END), 0) as total_refund
+            ")
             ->first();
 
         // Get withdrawal totals by status in one query
         $payoutSums = Payout::selectRaw("
-            SUM(CASE WHEN payout_status = 'Pending' THEN amount ELSE 0 END) as total_pending,
-            SUM(CASE WHEN payout_status = 'Success' THEN amount ELSE 0 END) as total_success
+            COALESCE(SUM(CASE WHEN payout_status = 'Pending' THEN amount ELSE 0 END), 0) as total_pending,
+            COALESCE(SUM(CASE WHEN payout_status = 'Success' THEN amount ELSE 0 END), 0) as total_success
         ")
             ->where('vendorid', $vendorId)
             ->first();
@@ -217,16 +216,50 @@ trait VendorWalletTrait
             ->where('status', 'Completed')
             ->where('vendor_commission_given', '=', '0')
             ->sum('vendor_commission');
-        $pendingPayout = ($walletSums->total_credit - $walletSums->total_debit - $walletSums->total_refund) - $payoutSums->total_pending;
+        $ledgerBalance = (float) $walletSums->total_credit
+            - (float) $walletSums->total_debit
+            - (float) $walletSums->total_refund;
+        $pendingPayout = max(0, $ledgerBalance - (float) $payoutSums->total_pending);
+        $cashCommissionDue = max(0, -$ledgerBalance);
+        $settlementThreshold = max(
+            25,
+            (float) (GeneralSetting::getMetaValue('minimum_negative_balance') ?: 25)
+        );
+        $commissionSettlementAmount = floor($cashCommissionDue / $settlementThreshold)
+            * $settlementThreshold;
 
         return [
-            'walletBalance' => number_format($walletSums->total_credit - $walletSums->total_debit - $walletSums->total_refund, 2),
+            'walletBalance' => number_format($ledgerBalance, 2),
             'pendingToWithdrawl' => number_format($payoutSums->total_pending, 2),
             'totalWithdrawled' => number_format($payoutSums->total_success, 2),
             'totalEarning' => number_format($walletSums->total_credit, 2),
             'refunded' => number_format($walletSums->total_refund, 2),
             'incoming_amount' => number_format($totalIncome, 2),
             'pendingPayout' => number_format($pendingPayout, 2),
+            'cashCommissionDue' => number_format($cashCommissionDue, 2),
+            'commissionSettlementThreshold' => number_format($settlementThreshold, 2),
+            'commissionSettlementAmount' => number_format($commissionSettlementAmount, 2),
+            'canSettleCommission' => $commissionSettlementAmount > 0,
         ];
+    }
+
+    /**
+     * Keepz Split settles the driver's share directly and therefore its
+     * booking-linked wallet rows are audit-only. The accounting ledger keeps
+     * only non-booking adjustments and the canonical cash-commission debit.
+     */
+    private function accountingWalletQuery($vendorId)
+    {
+        return VendorWallet::query()
+            ->where('vendor_id', $vendorId)
+            ->where(function ($query): void {
+                $query->whereNull('booking_id')
+                    ->orWhere('booking_id', 0)
+                    ->orWhere(
+                        'description',
+                        'like',
+                        'Cash ride platform commission for booking #%'
+                    );
+            });
     }
 }
