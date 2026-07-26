@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 CONTAINER="${CONTAINER:-rideon-app-1}"
 APP_ROOT="${APP_ROOT:-/var/www/html}"
+RUNTIME_USER="${RUNTIME_USER:-www-data}"
 SOURCE_COMMIT="${SOURCE_COMMIT:-46c6a039cfe04e83a61784ed4810ffcf7572766c}"
 BACKUP_ROOT="${BACKUP_ROOT:-/opt/rideon/backups}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
@@ -40,7 +41,7 @@ log() {
 }
 
 force_split_inactive() {
-  docker exec "$CONTAINER" sh -lc \
+  docker exec --user "$RUNTIME_USER" "$CONTAINER" sh -lc \
     "cd '${APP_ROOT}' && php artisan tinker --execute='\\App\\Models\\GeneralSetting::updateOrCreate([\"meta_key\" => \"keepz_split_status\"], [\"meta_value\" => \"Inactive\", \"module\" => 2]); echo \"KEEPZ_SPLIT=Inactive\".PHP_EOL;'" \
     >/dev/null 2>&1 || true
 }
@@ -64,7 +65,7 @@ restore_code() {
   fi
 
   force_split_inactive
-  docker exec "$CONTAINER" sh -lc "cd '${APP_ROOT}' && php artisan optimize:clear" || true
+  docker exec --user "$RUNTIME_USER" "$CONTAINER" sh -lc "cd '${APP_ROOT}' && php artisan optimize:clear" || true
 }
 
 cleanup() {
@@ -96,6 +97,16 @@ docker inspect "$CONTAINER" >/dev/null 2>&1 || {
 
 docker exec "$CONTAINER" test -f "${APP_ROOT}/artisan" || {
   echo "Laravel application was not found at ${APP_ROOT}" >&2
+  exit 1
+}
+
+docker exec --user "$RUNTIME_USER" "$CONTAINER" test -w "${APP_ROOT}/storage/framework/cache/data" || {
+  echo "Laravel cache directory is not writable by ${RUNTIME_USER}" >&2
+  exit 1
+}
+
+docker exec --user "$RUNTIME_USER" "$CONTAINER" test -w "${APP_ROOT}/bootstrap/cache" || {
+  echo "Laravel bootstrap cache directory is not writable by ${RUNTIME_USER}" >&2
   exit 1
 }
 
@@ -158,26 +169,31 @@ done
 FILES_INSTALLED=1
 
 log "Applying only the two additive Keepz Split migrations"
-docker exec "$CONTAINER" sh -lc \
+docker exec --user "$RUNTIME_USER" "$CONTAINER" sh -lc \
   "cd '${APP_ROOT}' && php artisan migrate --force --path=database/migrations/2026_07_23_000001_add_keepz_split_driver_payout_settings.php"
-docker exec "$CONTAINER" sh -lc \
+docker exec --user "$RUNTIME_USER" "$CONTAINER" sh -lc \
   "cd '${APP_ROOT}' && php artisan migrate --force --path=database/migrations/2026_07_23_000002_create_keepz_split_settlements_table.php"
 
 log "Forcing Keepz Split to Inactive until TEST verification is completed"
 force_split_inactive
 
 log "Clearing Laravel caches"
-docker exec "$CONTAINER" sh -lc "cd '${APP_ROOT}' && php artisan optimize:clear"
+docker exec --user "$RUNTIME_USER" "$CONTAINER" sh -lc "cd '${APP_ROOT}' && php artisan optimize:clear"
 
 log "Verifying routes, command registration and database records"
-docker exec "$CONTAINER" sh -lc \
+docker exec --user "$RUNTIME_USER" "$CONTAINER" sh -lc \
   "cd '${APP_ROOT}' && php artisan route:list --path=keepz-split"
-docker exec "$CONTAINER" sh -lc \
+docker exec --user "$RUNTIME_USER" "$CONTAINER" sh -lc \
   "cd '${APP_ROOT}' && php artisan route:list --path=send-pickup-otp"
-docker exec "$CONTAINER" sh -lc \
+docker exec --user "$RUNTIME_USER" "$CONTAINER" sh -lc \
   "cd '${APP_ROOT}' && php artisan list | grep -q 'payments:reconcile-keepz-split'"
-docker exec "$CONTAINER" sh -lc \
+docker exec --user "$RUNTIME_USER" "$CONTAINER" sh -lc \
   "cd '${APP_ROOT}' && php artisan tinker --execute='echo \"PAYOUT_METHODS=\".\\App\\Models\\PayoutMethod::where(\"name\", \"keepz split receiver\")->where(\"status\", 1)->count().PHP_EOL; echo \"SETTLEMENT_TABLE=\".(\\Illuminate\\Support\\Facades\\Schema::hasTable(\"keepz_split_settlements\") ? \"yes\" : \"no\").PHP_EOL; echo \"KEEPZ_SPLIT=\".(string) \\App\\Models\\GeneralSetting::getMetaValue(\"keepz_split_status\").PHP_EOL;'"
+
+if docker exec "$CONTAINER" find "${APP_ROOT}/storage" "${APP_ROOT}/bootstrap/cache" -user root -print -quit | grep -q .; then
+  echo "Root-owned Laravel runtime files were detected after deployment." >&2
+  exit 1
+fi
 
 SUCCESS=1
 log "KEEPZ SPLIT BACKEND DEPLOYED SAFELY"

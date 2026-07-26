@@ -7,6 +7,7 @@ use App\Http\Controllers\Traits\MiscellaneousTrait;
 use App\Http\Controllers\Traits\PaymentStatusUpdaterTrait;
 use App\Models\Booking;
 use App\Models\GeneralSetting;
+use App\Models\Transaction;
 use App\Strategies\PayduniyaStrategy;
 use App\Strategies\KeepzSplitStrategy;
 use App\Strategies\PaypalStrategy;
@@ -111,8 +112,14 @@ class PaymentFrontController extends Controller
 
     public function showPaymentPage(Request $request)
     {
-
         $bookingId = $request->booking;
+        $booking = ctype_digit((string) $bookingId)
+            ? Booking::find($bookingId)
+            : null;
+
+        if (! $booking || $booking->payment_status === 'paid') {
+            return redirect('/invalid-order')->with('error', 'Invalid booking ID');
+        }
 
         $keys = [
             'stripe_status',
@@ -134,13 +141,13 @@ class PaymentFrontController extends Controller
             ? $this->getGeneralSettingValue('test_stripe_public_key')
             : $this->getGeneralSettingValue('live_stripe_public_key');
 
-        if ($stripe_status->meta_value == 'Active') {
+        if ($stripe_status?->meta_value == 'Active') {
             $status_stripe = true;
         } else {
             $status_stripe = false;
         }
 
-        if ($paypal_status->meta_value == 'Active') {
+        if ($paypal_status?->meta_value == 'Active') {
             $status_paypal = true;
         } else {
             $status_paypal = false;
@@ -175,9 +182,28 @@ class PaymentFrontController extends Controller
 
     public function paymentSuccess(Request $request)
     {
-        $bookingId = $request->bookingId;
+        $bookingId = $request->input('bookingId', $request->input('booking'));
+        $booking = ctype_digit((string) $bookingId)
+            ? Booking::find($bookingId)
+            : null;
 
-        return view('Front.Success', compact('bookingId'));
+        if (! $booking || $booking->payment_status !== 'paid') {
+            return redirect()->route('payment_fail', ['bookingId' => $bookingId]);
+        }
+
+        if (
+            strtolower((string) $booking->payment_method) === 'keepz'
+            && ! Transaction::where('booking_id', $booking->id)
+                ->where('gateway_name', 'keepz')
+                ->where('payment_status', 'completed')
+                ->exists()
+        ) {
+            return redirect()->route('payment_fail', ['bookingId' => $booking->id]);
+        }
+
+        return response()
+            ->view('Front.Success', compact('bookingId'))
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     }
 
     public function paymentFail(Request $request)

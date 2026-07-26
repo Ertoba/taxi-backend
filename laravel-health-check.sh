@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if [ "$(id -u)" -eq 0 ]; then
+    echo "Refusing to run Laravel Artisan as root."
+    echo "Use the application user, for example: docker exec --user www-data rideon-app-1 ./laravel-health-check.sh"
+    exit 1
+fi
+
 echo "🚀 Running Laravel Health Check..."
 
 # 1. Laravel version

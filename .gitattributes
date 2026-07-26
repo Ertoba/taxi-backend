@@ -1,7 +1,7 @@
 * text=auto
+*.sh text eol=lf
 
 # Keep the supplied activation/validation implementation byte-for-byte intact.
 app/Http/Controllers/InstallerController.php -text
 resources/views/installer/purchase-validation.blade.php -text
 resources/views/installer/purchaseValidation-error.blade.php -text
-
