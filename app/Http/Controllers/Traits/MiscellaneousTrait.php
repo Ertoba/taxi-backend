@@ -77,9 +77,16 @@ trait MiscellaneousTrait
     {
         try {
             $itemType = ItemType::with('cityFare')->findOrFail($itemTypeId);
-            $recommendedFare = optional($itemType->cityFare)->recommended_fare ?? 0;
+            $cityFare = $itemType->cityFare;
+            $recommendedFare = max(0, (float) ($cityFare?->recommended_fare ?? 0));
+            $minimumFare = max(0, (float) ($cityFare?->min_fare ?? 0));
+            $distance = max(0, (float) $distance);
 
-            $priceBeforeDiscount = round($distance * $recommendedFare);
+            // Short rides must honor the configured minimum fare and keep decimals.
+            $priceBeforeDiscount = round(max(
+                $minimumFare,
+                $distance * $recommendedFare
+            ), 2);
             $totalPrice = $priceBeforeDiscount;
             $couponDiscount = 0;
 
@@ -95,10 +102,11 @@ trait MiscellaneousTrait
                 }
             }
 
-            $totalPrice = max(0, $totalPrice);
-            $walletApplied = min($walletAmount, $totalPrice);
-            $remainingWallet = $walletAmount - $walletApplied;
-            $grossPrice = $totalPrice - $walletApplied;
+            $totalPrice = max(0, round((float) $totalPrice, 2));
+            $walletAmount = max(0, (float) $walletAmount);
+            $walletApplied = round(min($walletAmount, $totalPrice), 2);
+            $remainingWallet = round(max(0, $walletAmount - $walletApplied), 2);
+            $grossPrice = round(max(0, $totalPrice - $walletApplied), 2);
 
             $response = [
                 'distance' => $distance,

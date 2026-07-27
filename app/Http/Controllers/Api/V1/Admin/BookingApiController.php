@@ -76,7 +76,45 @@ class BookingApiController extends Controller
         $itemId = $request->input('item_id');
         $conversionRate = Currency::getValueByCurrencyCode($currencyCode);
         $pricingResult = $this->getItemPricesDetails($itemTypeId, $distance, $couponCode, $walletAmount, $currencyCode, $conversionRate);
-        $pricing = $pricingResult->getData(true)['data'];
+        $pricingPayload = $pricingResult->getData(true);
+        if (($pricingPayload['status'] ?? 500) !== 200 || ! isset($pricingPayload['data'])) {
+            return $pricingResult;
+        }
+
+        $pricing = $pricingPayload['data'];
+        $serverBaseFare = round($this->convertFormattedNumber($pricing['price_before_discount'] ?? 0), 2);
+        $serverTotalPrice = round($this->convertFormattedNumber($pricing['total_price'] ?? 0), 2);
+        $serverGrossPrice = round($this->convertFormattedNumber($pricing['gross_price'] ?? 0), 2);
+        $serverWalletAmount = round($this->convertFormattedNumber($pricing['wallet_amount'] ?? 0), 2);
+
+        // A missing fare is a pricing/configuration error, never a paid wallet ride.
+        if ($serverBaseFare <= 0 || ($serverGrossPrice <= 0 && $serverWalletAmount <= 0)) {
+            Log::warning('Ride booking rejected because the authoritative fare was zero.', [
+                'user_id' => $userId,
+                'driver_id' => $request->driver_id,
+                'item_type_id' => $itemTypeId,
+                'distance_km' => (float) $distance,
+                'currency_code' => $currencyCode,
+            ]);
+
+            return $this->addErrorResponse(422, 'Ride fare is not configured for this vehicle type.', '');
+        }
+
+        if ($request->filled('amount_to_pay')) {
+            $clientAmount = round($this->convertFormattedNumber($request->input('amount_to_pay')), 2);
+            if (abs($clientAmount - $serverGrossPrice) > 0.01) {
+                Log::warning('Ride booking rejected because the client fare was stale.', [
+                    'user_id' => $userId,
+                    'driver_id' => $request->driver_id,
+                    'item_type_id' => $itemTypeId,
+                    'client_amount' => $clientAmount,
+                    'server_amount' => $serverGrossPrice,
+                    'currency_code' => $currencyCode,
+                ]);
+
+                return $this->addErrorResponse(409, 'The fare changed. Please request the ride again.', '');
+            }
+        }
 
         $booking = new Booking;
         $booking->itemid = $itemId;
@@ -85,9 +123,9 @@ class BookingApiController extends Controller
         $booking->ride_date = $request->ride_date;
         $booking->payment_status = 'notpaid';
         $booking->price_per_km = $pricing['price_per_km'];
-        $booking->base_price = $pricing['price_before_discount'];
-        $booking->total = $pricing['gross_price'];
-        $booking->wall_amt = $pricing['wallet_amount'];
+        $booking->base_price = $serverBaseFare;
+        $booking->total = $serverTotalPrice;
+        $booking->wall_amt = $serverWalletAmount;
         $booking->payment_status = 'notpaid';
         $requestedPaymentMethod = strtolower(trim((string) $request->input('payment_method')));
         $onlinePaymentsEnabled = strtolower((string) GeneralSetting::getMetaValue('onlinepayment')) === 'active';
@@ -100,7 +138,7 @@ class BookingApiController extends Controller
         $booking->coupon_code = $pricing['coupon_code'];
         $booking->coupon_discount = $pricing['coupon_discount'];
         $booking->discount_price = $pricing['coupon_discount'];
-        $booking->amount_to_pay = $pricing['gross_price'];
+        $booking->amount_to_pay = $serverGrossPrice;
         $booking->rating = 0;
         $booking->module = $request->module_id;
         $booking->status = 'Accepted';
@@ -153,7 +191,11 @@ class BookingApiController extends Controller
             $this->addWalletTransaction($userId, $booking->wall_amt, 'debit', 'Wallet used for ride #'.$booking->id);
         }
 
-        if ($pricing['gross_price'] < 1) {
+        $fullyCoveredByWallet = $serverTotalPrice > 0
+            && $serverGrossPrice <= 0.009
+            && $serverWalletAmount >= ($serverTotalPrice - 0.009);
+
+        if ($fullyCoveredByWallet) {
             $booking->payment_status = 'paid';
             $booking->payment_method = 'wallet';
             $booking->save();
@@ -603,9 +645,14 @@ class BookingApiController extends Controller
             }
 
             $itemType = ItemType::with('cityFare')->findOrFail($itemTypeId);
-            $recommendedFare = optional($itemType->cityFare)->recommended_fare ?? 0;
+            $cityFare = $itemType->cityFare;
+            $recommendedFare = max(0, (float) ($cityFare?->recommended_fare ?? 0));
+            $minimumFare = max(0, (float) ($cityFare?->min_fare ?? 0));
 
-            $priceBeforeDiscount = round($distance * $recommendedFare);
+            $priceBeforeDiscount = round(max(
+                $minimumFare,
+                max(0, (float) $distance) * $recommendedFare
+            ), 2);
             $totalPrice = $priceBeforeDiscount;
 
             if ($coupon->min_order_amount > 0 && $coupon->min_order_amount > $totalPrice) {
