@@ -1,1 +1,2 @@
 One-time trigger for the scoped RideOn payment hotfix.
+Retry: 2
