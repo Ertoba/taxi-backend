@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - .github/workflows/rideon-payment-hotfix.yml
+  pull_request:
+    types: [opened]
 
 permissions:
   contents: write
