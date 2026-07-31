@@ -56,7 +56,7 @@ return [
     'slider_title' => 'Sliders',
     'staticPage_title' => 'Static Pages',
     'emailTemplate_title' => 'Email Templates',
-    'tickets_title' => 'Support Tickets',
+    'tickets_title' => 'Live Chat',
 
     'change_password' => 'Change Password',
     'logout' => 'Logout',

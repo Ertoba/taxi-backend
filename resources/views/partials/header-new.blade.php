@@ -3,7 +3,7 @@
             <span class="logo-mini">
                 @if (isset($logoPath) && !empty($logoPath) && file_exists(public_path($logoPath)))
                 <img src="{{ $logoPath }}" alt="{{ $siteName ?? trans('global.site_title') }}" />
-                <span> Ridon </span>
+                <span>Mili Taxi</span>
                 @else
                 <b>{{ $siteName ?? trans('global.site_title') }}</b>
                 @endif
@@ -11,7 +11,7 @@
             <span class="logo-lg">
                 @if (isset($logoPath) && !empty($logoPath) && file_exists(public_path($logoPath)))
                 <img src="{{ $logoPath }}" alt="{{ $siteName ?? trans('global.site_title') }}" />
-                <span>Ridon</span>
+                <span>Mili Taxi</span>
                 @else
                 {{ $siteName ?? trans('global.site_title') }}
                 @endif
@@ -101,7 +101,7 @@
                         </li>
 
                         <li>
-                            <a href="https://welcome-rideon.unibooker.app/" target="_blank" class="icon-circle" title="Visit Landing Page">
+                            <a href="https://taxi.mili.ge/" target="_blank" class="icon-circle" title="Mili Taxi">
                                 <i class="fa fa-globe"></i>
                             </a>
                         </li>
@@ -218,28 +218,10 @@
                                 </li>
                             </ul>
                         </li>
-                        <li class="dropdown">
-                            <a href="#" class="dropdown-toggle icon-circle" data-toggle="dropdown">
+                        <li>
+                            <a href="{{ route('admin.ticket.index') }}" class="icon-circle" title="Live Chat">
                                 <i class="fa fa-comment-o"></i>
                             </a>
-                            <ul class="dropdown-menu">
-                                <li class="header" style="padding: 10px 20px; font-weight:bold; border-bottom:1px solid #eee;">
-                                    Recent Chats
-                                </li>
-                                <li>
-                                    <div class="empty-state-container">
-                                        <svg width="140" height="120" viewBox="0 0 150 120" fill="none" xmlns="http://www.w3.org/2000/svg" class="chat-animation">
-                                            <path class="bubble-1" d="M14.5 48.5C14.5 24.4756 35.7665 5 62 5C88.2335 5 109.5 24.4756 109.5 48.5C109.5 72.5244 88.2335 92 62 92C56.634 92 51.5033 91.1852 46.7329 89.6808L24.5 98V77.7288C18.4239 70.3644 14.5 60.103 14.5 48.5Z" fill="#ffca3b" />
-                                            <rect x="38" y="32" width="50" height="6" rx="3" fill="white" fill-opacity="0.4" />
-                                            <rect x="38" y="46" width="50" height="6" rx="3" fill="white" fill-opacity="0.4" />
-                                            <rect x="38" y="60" width="30" height="6" rx="3" fill="white" fill-opacity="0.4" />
-                                            <path class="bubble-2" d="M125 76.5C125 58.5507 109.106 44 89.5 44C69.8939 44 54 58.5507 54 76.5C54 94.4493 69.8939 109 89.5 109C93.5015 109 97.3323 108.384 100.893 107.253L117.5 113.5V98.2619C122.031 92.7301 125 85.0471 125 76.5Z" fill="#E6B51C" />
-                                        </svg>
-                                        <div class="empty-state-text">Coming Soon<</div>
-                                    </div>
-
-                                </li>
-                            </ul>
                         </li>
                       @php
     $user = auth()->user();

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
 
 class SupportTicket extends Model
 {
@@ -25,6 +26,16 @@ class SupportTicket extends Model
         'operator_active' => 'boolean',
         'last_message_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::deleting(function (SupportTicket $ticket): void {
+            $ticket->replies()
+                ->whereNotNull('attachment_path')
+                ->pluck('attachment_path')
+                ->each(fn (string $path) => Storage::disk('local')->delete($path));
+        });
+    }
 
     public function appUser()
     {

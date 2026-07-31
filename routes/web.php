@@ -3,8 +3,13 @@
 use App\Http\Controllers\Admin\CurrencyController;
 use App\Http\Controllers\Admin\GeneralSettingController;
 use App\Http\Controllers\Admin\UsersController;
+use App\Http\Controllers\Api\V1\Admin\SupportChatApiController;
 use App\Http\Controllers\Front\CommissionSettlementController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/support-chat/attachments/{reply}', [SupportChatApiController::class, 'attachment'])
+    ->middleware('signed')
+    ->name('support-chat.attachment');
 
 Route::get('/privacy-policy', 'App\Http\Controllers\Front\ExternalPagesController@privacyPolicy')->name('privacy-policy');
 Route::get('/payment_methods', 'App\Http\Controllers\Front\PaymentFrontController@showPaymentPage')->name('payment_methods');
@@ -436,6 +441,7 @@ Route::group(['prefix' => 'admin', 'as' => 'admin.', 'namespace' => 'Admin', 'mi
     Route::get('ticket', 'TicketController@index')->name('ticket.index');
     Route::get('ticket/replies/{id}', 'TicketController@reply')->name('ticket.replies');
     Route::get('ticket/threads/{id}', 'TicketController@threads')->name('ticket.thread');
+    Route::get('ticket/threads/{id}/messages', 'TicketController@messages')->name('ticket.thread.messages');
     Route::post('ticket/threads/create/{id}', 'TicketController@create')->name('ticket.thread.create');
     Route::post('ticket/threads/{id}/mode', 'TicketController@mode')->name('ticket.thread.mode');
     Route::delete('ticket/delete/{id}', 'TicketController@destroy')->name('ticket.destroy');

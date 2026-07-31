@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ka">
 
 <head>
     <meta charset="utf-8">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
-    <title>Rideon - Book Your Car, Anytime</title>
+    <title>Mili Taxi — მგზავრობა მარტივად</title>
     <meta name="description"
-        content="Book a car effortlessly with Rideon. Get reliable rides, experienced drivers, and 24/7 support right from your phone. Download the app and book your way, anytime, anywhere.">
-    <meta name="keywords" content="book a car, ride service, ride-hailing, car booking app, rideon">
+        content="Mili Taxi — შეუკვეთეთ ტაქსი მარტივად, აკონტროლეთ მგზავრობა და მიიღეთ მხარდაჭერა აპიდან.">
+    <meta name="keywords" content="Mili Taxi, ტაქსი, მგზავრობა, taxi app, Georgia">
     <!-- Favicons -->
     <link href="assets/img/favicon.png" rel="icon">
     <link href="assets/img/apple-touch-icon.png" rel="apple-touch-icon">
@@ -31,7 +31,7 @@
     <header id="header" class="header d-flex align-items-center fixed-top">
         <div class="container-fluid container-xl position-relative d-flex align-items-center justify-content-between">
             <a href="/" class="logo d-flex align-items-center">
-                <h1 class="sitename"><img src="assets/img/logo-ride-on.svg" alt="Rideon Logo"></h1>
+                <h1 class="sitename"><img src="assets/img/mili-taxi-logo.png" alt="Mili Taxi"></h1>
             </a>
             <nav id="navmenu" class="navmenu ">
                 <ul>

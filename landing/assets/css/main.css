@@ -132,10 +132,13 @@ h1, h2, h3, h4, h5, h6 {
 .header .logo {
 	line-height: 1;
 }
-.header .logo img {
-	max-height:57px;
-	margin-right: 8px;
-}
+.header .logo img {
+	max-height:57px;
+	width:57px;
+	object-fit:cover;
+	border-radius:12px;
+	margin-right: 8px;
+}
 .header .logo h1 {
 	font-size: 30px;
 	margin: 0;
@@ -383,10 +386,13 @@ h1, h2, h3, h4, h5, h6 {
 	line-height: 1;
 	margin-bottom: 25px;
 }
-.footer .footer-about .logo img {
-margin-right: 6px;
-    width: 50%;
-}
+.footer .footer-about .logo img {
+margin-right: 6px;
+    width: 96px;
+    height: 96px;
+    object-fit: cover;
+    border-radius: 18px;
+}
 .footer .footer-about .logo span {
 	font-size: 26px;
 	font-weight: 700;

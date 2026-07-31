@@ -127,6 +127,10 @@
                                     <td>{{ $ticket->description ?? '' }}</td>
 
                                     <td>
+                                        <a href="{{ route('admin.ticket.thread', $ticket->id) }}"
+                                           class="btn btn-xs btn-primary" title="Open chat">
+                                            <i class="fa fa-comments" aria-hidden="true"></i>
+                                        </a>
                                         @can('ticket_delete')
                                         <button type="button" class="btn btn-xs btn-danger delete-button" data-id="{{ $ticket->id }}">
                                             <i class="fa fa-trash" aria-hidden="true"></i>

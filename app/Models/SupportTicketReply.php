@@ -11,6 +11,10 @@ class SupportTicketReply extends Model
         'user_id',
         'is_admin_reply',
         'message',
+        'attachment_path',
+        'attachment_name',
+        'attachment_mime',
+        'attachment_size',
         'reply_status',
         'source',
     ];
@@ -18,6 +22,7 @@ class SupportTicketReply extends Model
     protected $casts = [
         'is_admin_reply' => 'boolean',
         'reply_status' => 'boolean',
+        'attachment_size' => 'integer',
     ];
 
     public function ticket()

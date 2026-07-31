@@ -49,7 +49,7 @@
     <div class="container footer-top">
         <div class="row gy-4">
             <div class="col-lg-7 col-md-6 footer-about"> <a href="index.html" class="logo d-flex align-items-center">
-                    <span class="sitename"><img src="assets/img/logo-ride-on.svg" alt="Rideon Logo"></span> </a>
+                    <span class="sitename"><img src="assets/img/mili-taxi-logo.png" alt="Mili Taxi"></span> </a>
                 <div class="footer-contact pt-3">
                     <p><img src="assets/img/location.png" alt=""> D-52 Sector 2, Noida, Uttar Pradesh 201301</p>
                     <p> <img src="assets/img/call.png" alt=""> +91 9540223464</p>
@@ -90,7 +90,7 @@
     <div class="container copyright text-center mt-4">
         <div class="row">
             <div class="col-lg-10 col-md-10">
-                <p>Copyright 2025 ・ Rideon, All Rights Reserved</p>
+                <p>Copyright 2026 ・ Mili Taxi, All Rights Reserved</p>
             </div>
             <div class="col-lg-2 col-md-2">
                 <div class="credits">
