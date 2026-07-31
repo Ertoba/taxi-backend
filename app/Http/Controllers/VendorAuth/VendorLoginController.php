@@ -28,10 +28,10 @@ class VendorLoginController extends Controller
         $private_key = GeneralSetting::where('meta_key', 'private_key')->first();
 
         return view('vendor.login', [
-            'logoUrl' => '/storage/'.$logoUrl->meta_value,
-            'siteName' => $general_name->meta_value,
+            'logoUrl' => '/brand/mili-taxi-logo.png',
+            'siteName' => 'Mili Taxi',
             'tagLine' => $general_description->meta_value,
-            'faviconUrl' => '/storage/'.$faviconUrl->meta_value,
+            'faviconUrl' => '/brand/mili-taxi-icon.png',
             'loginBackgroud' => '/storage/'.$general_loginBackgroud->meta_value,
             'general_captcha' => $general_captcha->meta_value,
             'site_key' => $site_key->meta_value,
@@ -55,10 +55,10 @@ class VendorLoginController extends Controller
         $private_key = GeneralSetting::where('meta_key', 'private_key')->first();
 
         return view('vendor.register', [
-            'logoUrl' => '/storage/'.$logoUrl->meta_value,
-            'siteName' => $general_name->meta_value,
+            'logoUrl' => '/brand/mili-taxi-logo.png',
+            'siteName' => 'Mili Taxi',
             'tagLine' => $general_description->meta_value,
-            'faviconUrl' => '/storage/'.$faviconUrl->meta_value,
+            'faviconUrl' => '/brand/mili-taxi-icon.png',
             'loginBackgroud' => '/storage/'.$general_loginBackgroud->meta_value,
             'general_captcha' => $general_captcha->meta_value,
             'site_key' => $site_key->meta_value,
@@ -236,10 +236,10 @@ class VendorLoginController extends Controller
         $private_key = GeneralSetting::where('meta_key', 'private_key')->first();
 
         return view('vendor.hostRequest', [
-            'logoUrl' => '/storage/'.$logoUrl->meta_value,
-            'siteName' => $general_name->meta_value,
+            'logoUrl' => '/brand/mili-taxi-logo.png',
+            'siteName' => 'Mili Taxi',
             'tagLine' => $general_description->meta_value,
-            'faviconUrl' => '/storage/'.$faviconUrl->meta_value,
+            'faviconUrl' => '/brand/mili-taxi-icon.png',
             'loginBackgroud' => '/storage/'.$general_loginBackgroud->meta_value,
             'general_captcha' => $general_captcha->meta_value,
             'site_key' => $site_key->meta_value,

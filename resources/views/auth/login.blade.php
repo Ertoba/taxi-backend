@@ -38,8 +38,8 @@
                         @endif
 
                         <div class="login-logo">
-                            <h2>Admin Signin</h2>
-                            <p style="font-size: medium;">Welcome back login to your panel.</p>
+                            <h2>ადმინისტრატორის ავტორიზაცია</h2>
+                            <p style="font-size: medium;">კეთილი იყოს თქვენი დაბრუნება. შედით მართვის პანელში.</p>
                         </div>
 
                         <div class="login-box-body">

@@ -314,10 +314,10 @@ class LoginController extends Controller
         ])->pluck('meta_value', 'meta_key');
 
         return [
-            'logoUrl' => '/storage/'.($settings['general_logo'] ?? 'default_logo.png'),
-            'siteName' => $settings['general_name'] ?? '',
+            'logoUrl' => '/brand/mili-taxi-logo.png',
+            'siteName' => 'Mili Taxi',
             'tagLine' => $settings['general_description'] ?? '',
-            'faviconUrl' => '/storage/'.($settings['general_favicon'] ?? 'default_favicon.png'),
+            'faviconUrl' => '/brand/mili-taxi-icon.png',
             'loginBackgroud' => '/storage/'.($settings['general_loginBackgroud'] ?? 'default_bg.png'),
             'general_captcha' => $settings['general_captcha'] ?? '',
             'site_key' => $settings['site_key'] ?? '',
