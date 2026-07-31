@@ -57,7 +57,7 @@
 </head>
 
 <body class="sidebar-mini skin-purple" style="height: auto; min-height: 100%;">
-    <div x-data="pageTransition()" x-init="init()" x-cloak
+    <div x-data="pageLoader()" x-cloak
         style="position: fixed; top: 0; left: 0; width: 100%; z-index: 9999;">
         <div x-ref="bar" class="top-loader"></div>
     </div>
