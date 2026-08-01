@@ -15,8 +15,10 @@ use App\Http\Requests\UpdatePayoutRequest;
 use App\Models\AppUser;
 use App\Models\GeneralSetting;
 use App\Models\Payout;
+use App\Models\VendorWallet;
 use Gate;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class PayoutController extends Controller
@@ -162,19 +164,51 @@ class PayoutController extends Controller
             $payoutData->addMedia($request->file('payout_proof'))->toMediaCollection('payout_proof');
         }
 
-        $newStatus = 'Success';
-        $payoutData->payout_status = $newStatus;
-        $payoutData->save();
+        $approval = DB::transaction(function () use ($payout) {
+            $lockedPayout = Payout::whereKey($payout)->lockForUpdate()->first();
+            if (! $lockedPayout) {
+                return null;
+            }
+
+            if ($lockedPayout->payout_status === 'Success') {
+                return ['payout' => $lockedPayout, 'newly_approved' => false];
+            }
+
+            $lockedPayout->payout_status = 'Success';
+            $lockedPayout->save();
+
+            VendorWallet::firstOrCreate(
+                [
+                    'vendor_id' => $lockedPayout->vendorid,
+                    'payout_id' => $lockedPayout->id,
+                    'type' => 'debit',
+                    'description' => 'Payout Status Update',
+                ],
+                [
+                    'amount' => $lockedPayout->amount,
+                    'booking_id' => null,
+                ]
+            );
+
+            return ['payout' => $lockedPayout, 'newly_approved' => true];
+        });
+
+        if (! $approval) {
+            return response()->json(['error' => 'Payout not found'], 404);
+        }
+
+        $payoutData = $approval['payout'];
+        if (! $approval['newly_approved']) {
+            return response()->json([
+                'ststus' => 200,
+                'message' => 'Payout was already approved.',
+            ]);
+        }
 
         $vendorId = $payoutData->vendorid;
         $amount = $payoutData->amount;
         $currency = $payoutData->currency;
-        $bookingId = null;
-        $payoutId = $payout;
-        $type = 'debit';
-        $description = 'Payout Status Update';
-
-        $this->addVendorWalletTransaction($vendorId, $amount, $type, $bookingId, $payoutId, $description);
+        $this->sendNotificationOnWalletTransaction($vendorId, $amount, 'debit');
 
         $user = AppUser::where('id', $vendorId)->first();
         $settings = GeneralSetting::whereIn('meta_key', ['general_email'])
@@ -190,7 +224,7 @@ class PayoutController extends Controller
         $valuesArray['currency_code'] = $currency;
         $valuesArray['payout_amount'] = $amount;
         $valuesArray['payout_bank'] = $payoutData->payment_method;
-        $valuesArray['support_email'] = $general_email->meta_value;
+        $valuesArray['support_email'] = $general_email?->meta_value ?? '';
         $valuesArray['payout_date'] = now()->format('Y-m-d');
         $this->sendAllNotifications($valuesArray, $user->id, $template_id);
 

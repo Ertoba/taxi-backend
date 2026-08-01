@@ -23,6 +23,7 @@ use App\Models\Modern\Item;
 use App\Models\Modern\ItemType;
 use App\Models\Review;
 use App\Models\VendorWallet;
+use App\Services\CommissionCalculator;
 use App\Services\PickupOtpService;
 use Carbon\Carbon;
 use DB;
@@ -159,7 +160,10 @@ class BookingApiController extends Controller
             $estimatedDurationMin = ($distance / $vehicleSpeed) * 60;
         }
 
-        $commissions = $this->calculateCommissions($this->convertFormattedNumber($pricing['total_price']), $bookingItem[0]['item_type_id']);
+        $commissions = $this->calculateCommissions(
+            $this->convertFormattedNumber($pricing['total_price']),
+            $bookingItem[0]['item_type_id']
+        );
         $booking->admin_commission = $commissions['admin_commission'];
         $booking->vendor_commission = $commissions['vendor_commission'];
 
@@ -235,13 +239,10 @@ class BookingApiController extends Controller
     {
         $itemType = ItemType::find($itemTypeId);
         $adminCommissionPercent = optional($itemType->cityFare)->admin_commission ?? 0;
-        $adminCommission = floor(($basePrice * $adminCommissionPercent) / 100);
-        $vendorCommission = $basePrice - $adminCommission;
-
-        return [
-            'admin_commission' => (int) $adminCommission,
-            'vendor_commission' => (int) $vendorCommission,
-        ];
+        return app(CommissionCalculator::class)->calculate(
+            (float) $basePrice,
+            (float) $adminCommissionPercent
+        );
     }
 
     public function bookingRecord(Request $request)
